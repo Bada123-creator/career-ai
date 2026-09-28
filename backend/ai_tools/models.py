@@ -26,6 +26,20 @@ class Analysis(models.Model):
 
     overall_score = models.FloatField()
 
+    coverage_score = models.FloatField(
+        default=100.0,
+    )
+
+    confidence_level = models.CharField(
+        max_length=10,
+        choices=[
+            ("low", "Faible"),
+            ("medium", "Moyenne"),
+            ("high", "Élevée"),
+        ],
+        default="high",
+    )
+
     skill_score = models.FloatField(
         null=True,
         blank=True,

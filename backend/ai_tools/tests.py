@@ -156,6 +156,8 @@ class AnalysisSecurityTests(APITestCase):
     ):
         mock_match.return_value = {
             "overall_score": 82,
+            "coverage_score": 100.0,
+            "confidence_level": "high",
             "skill_score": 85,
             "experience_score": 80,
             "education_score": 78,
@@ -207,6 +209,67 @@ class AnalysisSecurityTests(APITestCase):
             analysis.overall_score,
             82,
         )
+        self.assertEqual(
+            analysis.coverage_score,
+            100.0,
+        )
+        self.assertEqual(
+            analysis.confidence_level,
+            "high",
+        )
         self.assertTrue(
             analysis.ai_available
         )
+
+
+class ScoringV2Tests(APITestCase):
+    def test_overall_score_with_full_coverage(self):
+        from ai_tools.services import calculate_scoring_summary
+
+        result = calculate_scoring_summary({
+            "skill_score": 80,
+            "experience_score": 60,
+            "education_score": 100,
+        })
+
+        self.assertEqual(result["overall_score"], 78.0)
+        self.assertEqual(result["coverage_score"], 100.0)
+        self.assertEqual(result["confidence_level"], "high")
+
+    def test_partial_analysis_reports_low_coverage(self):
+        from ai_tools.services import calculate_scoring_summary
+
+        result = calculate_scoring_summary({
+            "skill_score": None,
+            "experience_score": 100,
+            "education_score": None,
+        })
+
+        self.assertEqual(result["overall_score"], 25.0)
+        self.assertEqual(result["coverage_score"], 25.0)
+        self.assertEqual(result["confidence_level"], "low")
+
+    def test_medium_coverage(self):
+        from ai_tools.services import calculate_scoring_summary
+
+        result = calculate_scoring_summary({
+            "skill_score": 70,
+            "experience_score": 80,
+            "education_score": None,
+        })
+
+        self.assertEqual(result["coverage_score"], 85.0)
+        self.assertEqual(result["confidence_level"], "high")
+
+    def test_no_evaluable_dimension(self):
+        from ai_tools.services import calculate_scoring_summary
+
+        result = calculate_scoring_summary({
+            "skill_score": None,
+            "experience_score": None,
+            "education_score": None,
+        })
+
+        self.assertEqual(result["overall_score"], 0)
+        self.assertEqual(result["coverage_score"], 0.0)
+        self.assertEqual(result["confidence_level"], "low")

@@ -5,6 +5,7 @@ from rest_framework.response import Response
 
 from .models import Job
 from .serializers import JobSerializer
+from .job_enrichment_service import enrich_job_description
 
 
 @api_view(["GET", "POST"])
@@ -28,7 +29,40 @@ def job_list_create(request):
     )
 
     if serializer.is_valid():
-        serializer.save(user=request.user)
+        validated = serializer.validated_data
+
+        original_description = validated.get(
+            "description",
+            "",
+        )
+        original_source_url = validated.get(
+            "source_url",
+            "",
+        )
+
+        try:
+            enrichment = enrich_job_description(
+                description=original_description,
+                source_url=original_source_url,
+            )
+        except Exception as exc:
+            print(
+                "CAREERAI JOB ENRICHMENT ERROR:",
+                exc,
+            )
+
+            enrichment = {
+                "description": original_description,
+                "source_url": original_source_url,
+                "enriched": False,
+                "source": "fallback",
+            }
+
+        serializer.save(
+            user=request.user,
+            description=enrichment["description"],
+            source_url=enrichment["source_url"],
+        )
 
         return Response(
             serializer.data,

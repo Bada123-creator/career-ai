@@ -14,6 +14,8 @@ export type Analysis = {
   };
   matching: {
     overall_score: number;
+    coverage_score: number;
+    confidence_level: "low" | "medium" | "high";
     skill_score: number | null;
     experience_score: number | null;
     education_score: number | null;

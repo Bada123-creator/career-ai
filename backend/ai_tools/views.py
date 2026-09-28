@@ -45,6 +45,8 @@ def serialize_analysis(analysis):
         },
         "matching": {
             "overall_score": analysis.overall_score,
+            "coverage_score": analysis.coverage_score,
+            "confidence_level": analysis.confidence_level,
             "skill_score": analysis.skill_score,
             "experience_score": analysis.experience_score,
             "education_score": analysis.education_score,
@@ -140,6 +142,8 @@ def match_resume_job(request):
         resume=resume,
         job=job,
         overall_score=matching["overall_score"],
+        coverage_score=matching["coverage_score"],
+        confidence_level=matching["confidence_level"],
         skill_score=matching.get("skill_score"),
         experience_score=matching.get(
             "experience_score"
