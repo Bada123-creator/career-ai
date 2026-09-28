@@ -1,7 +1,13 @@
 from django.urls import path
-from .views import my_profile
+
+from .views import my_profile, register
 
 
 urlpatterns = [
-    path("me/", my_profile),
+    path("register/", register, name="register"),
+    path("me/", my_profile, name="my_profile"),
 ]
+
+
+
+
