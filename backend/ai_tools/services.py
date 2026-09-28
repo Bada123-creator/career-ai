@@ -1,26 +1,208 @@
-from cvs.services import extract_skills
+import re
+
+from cvs.services import SKILL_ALIASES, extract_skills
 
 
-def calculate_skill_score(resume_skills, job_skills):
+def _skill_is_essential(job_text, skill):
+    """
+    Détermine si une compétence est essentielle à partir de son
+    contexte dans l'offre.
+
+    Une compétence est essentielle lorsqu'elle apparaît :
+    - avec un marqueur d'exigence forte ;
+    - dans une mission/action explicitement demandée.
+
+    Une compétence présentée comme bonus reste complémentaire.
+    """
+    if not job_text:
+        return False
+
+    strong_markers = [
+        "requis",
+        "requise",
+        "requises",
+        "obligatoire",
+        "obligatoires",
+        "indispensable",
+        "indispensables",
+        "exigé",
+        "exigée",
+        "exigées",
+        "maîtrise",
+        "maitrise",
+        "maîtriser",
+        "maitriser",
+        "bonne connaissance",
+        "bonnes connaissances",
+        "solide connaissance",
+        "solides connaissances",
+        "connaissances en",
+        "connaissance en",
+        "expérience avec",
+        "expérience en",
+    ]
+
+    bonus_markers = [
+        "un plus",
+        "serait un plus",
+        "constitue un plus",
+        "constituent un plus",
+        "apprécié",
+        "appréciée",
+        "appréciées",
+        "souhaité",
+        "souhaitée",
+        "bonus",
+    ]
+
+    mission_verbs = [
+        "automatiser",
+        "rédiger",
+        "extraire",
+        "analyser",
+        "interroger",
+        "manipuler",
+        "réaliser",
+        "concevoir",
+        "maintenir",
+        "développer",
+        "paramétrer",
+        "créer",
+        "produire",
+        "construire",
+        "mettre en place",
+        "utiliser",
+        "exploiter",
+    ]
+
+    aliases = SKILL_ALIASES.get(skill, [skill])
+
+    sentences = re.split(
+        r"(?<=[.!?;])\s+|\n+",
+        job_text,
+    )
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+
+        if not sentence:
+            continue
+
+        skill_present = any(
+            re.search(
+                rf"(?<!\w){re.escape(alias)}(?!\w)",
+                sentence,
+                re.IGNORECASE,
+            )
+            for alias in aliases
+        )
+
+        if not skill_present:
+            continue
+
+        sentence_lower = sentence.lower()
+
+        # Un bonus explicite ne doit jamais devenir essentiel.
+        if any(
+            marker in sentence_lower
+            for marker in bonus_markers
+        ):
+            continue
+
+        if any(
+            marker in sentence_lower
+            for marker in strong_markers
+        ):
+            return True
+
+        if any(
+            re.search(
+                rf"\b{re.escape(verb)}\b",
+                sentence_lower,
+            )
+            for verb in mission_verbs
+        ):
+            return True
+
+    return False
+
+
+def classify_job_skills(job_text, job_skills):
+    """
+    Classe les compétences explicitement présentes dans l'offre.
+
+    essential :
+        l'offre contient un marqueur d'exigence forte à proximité.
+
+    complementary :
+        la compétence est présente, mais aucune exigence forte
+        explicite n'a été détectée.
+    """
+    essential = []
+    complementary = []
+
+    for skill in job_skills:
+        if _skill_is_essential(job_text, skill):
+            essential.append(skill)
+        else:
+            complementary.append(skill)
+
+    return {
+        "essential": essential,
+        "complementary": complementary,
+    }
+
+
+def calculate_skill_score(
+    resume_skills,
+    job_skills,
+    essential_skills=None,
+):
+    """
+    Calcule le score technique.
+
+    Une compétence essentielle vaut 2 points.
+    Une compétence complémentaire vaut 1 point.
+
+    Sans classification fournie, le comportement historique est
+    conservé : toutes les compétences valent 1 point.
+    """
     resume_set = {
         skill.lower()
         for skill in resume_skills
     }
 
+    essential_set = {
+        skill.lower()
+        for skill in (essential_skills or [])
+    }
+
     matching_skills = []
     missing_skills = []
-
-    for skill in job_skills:
-        if skill.lower() in resume_set:
-            matching_skills.append(skill)
-        else:
-            missing_skills.append(skill)
 
     if not job_skills:
         return None, matching_skills, missing_skills
 
+    earned_points = 0
+    total_points = 0
+
+    for skill in job_skills:
+        weight = (
+            2
+            if skill.lower() in essential_set
+            else 1
+        )
+
+        total_points += weight
+
+        if skill.lower() in resume_set:
+            matching_skills.append(skill)
+            earned_points += weight
+        else:
+            missing_skills.append(skill)
+
     score = round(
-        len(matching_skills) / len(job_skills) * 100,
+        earned_points / total_points * 100,
         2,
     )
 
@@ -312,14 +494,32 @@ def match_resume_to_job(resume, job):
         resume.extracted_text
     )
 
-    job_skills = extract_skills(
-        job.description
+    job_text = (
+        f"{job.title}\n{job.description}"
     )
+
+    job_skills = extract_skills(
+        job_text
+    )
+
+    skill_classification = classify_job_skills(
+        job_text,
+        job_skills,
+    )
+
+    essential_skills = skill_classification[
+        "essential"
+    ]
+
+    complementary_skills = skill_classification[
+        "complementary"
+    ]
 
     skill_score, matching_skills, missing_skills = (
         calculate_skill_score(
             resume_skills,
             job_skills,
+            essential_skills=essential_skills,
         )
     )
 
@@ -352,6 +552,8 @@ def match_resume_to_job(resume, job):
         "education_score": education_score,
         "resume_skills": resume_skills,
         "job_skills": job_skills,
+        "essential_skills": essential_skills,
+        "complementary_skills": complementary_skills,
         "matching_skills": matching_skills,
         "missing_skills": missing_skills,
     }

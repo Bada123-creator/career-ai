@@ -273,3 +273,121 @@ class ScoringV2Tests(APITestCase):
         self.assertEqual(result["overall_score"], 0)
         self.assertEqual(result["coverage_score"], 0.0)
         self.assertEqual(result["confidence_level"], "low")
+
+
+class AnalysisEngineV3Tests(APITestCase):
+    def test_mission_skill_is_essential(self):
+        from ai_tools.services import classify_job_skills
+
+        result = classify_job_skills(
+            "Automatiser certaines tâches avec Python.",
+            ["Python"],
+        )
+
+        self.assertEqual(
+            result["essential"],
+            ["Python"],
+        )
+
+    def test_database_requirement_is_essential(self):
+        from ai_tools.services import classify_job_skills
+
+        result = classify_job_skills(
+            "Profil avec des connaissances en SQL.",
+            ["SQL"],
+        )
+
+        self.assertEqual(
+            result["essential"],
+            ["SQL"],
+        )
+
+    def test_bonus_skill_remains_complementary(self):
+        from ai_tools.services import classify_job_skills
+
+        result = classify_job_skills(
+            "Une connaissance de Django constitue un plus.",
+            ["Django"],
+        )
+
+        self.assertEqual(
+            result["essential"],
+            [],
+        )
+
+        self.assertEqual(
+            result["complementary"],
+            ["Django"],
+        )
+
+
+    def test_classifies_explicit_required_skill_as_essential(self):
+        from ai_tools.services import classify_job_skills
+
+        text = """
+        La maîtrise de Python est indispensable.
+        Une connaissance de Power BI serait appréciée.
+        """
+
+        result = classify_job_skills(
+            text,
+            ["Python", "Power BI"],
+        )
+
+        self.assertIn(
+            "Python",
+            result["essential"],
+        )
+        self.assertIn(
+            "Power BI",
+            result["complementary"],
+        )
+
+    def test_essential_skill_has_more_weight(self):
+        from ai_tools.services import calculate_skill_score
+
+        score, matching, missing = calculate_skill_score(
+            resume_skills=["Excel"],
+            job_skills=["Python", "Excel"],
+            essential_skills=["Python"],
+        )
+
+        self.assertEqual(score, 33.33)
+        self.assertEqual(matching, ["Excel"])
+        self.assertEqual(missing, ["Python"])
+
+    def test_matching_essential_skill_is_rewarded_more(self):
+        from ai_tools.services import calculate_skill_score
+
+        score, matching, missing = calculate_skill_score(
+            resume_skills=["Python"],
+            job_skills=["Python", "Excel"],
+            essential_skills=["Python"],
+        )
+
+        self.assertEqual(score, 66.67)
+        self.assertEqual(matching, ["Python"])
+        self.assertEqual(missing, ["Excel"])
+
+    def test_no_classification_preserves_equal_weighting(self):
+        from ai_tools.services import calculate_skill_score
+
+        score, _, _ = calculate_skill_score(
+            resume_skills=["Python"],
+            job_skills=["Python", "Excel"],
+        )
+
+        self.assertEqual(score, 50.0)
+
+    def test_empty_job_skills_remains_not_evaluable(self):
+        from ai_tools.services import calculate_skill_score
+
+        score, matching, missing = calculate_skill_score(
+            resume_skills=["Python"],
+            job_skills=[],
+            essential_skills=[],
+        )
+
+        self.assertIsNone(score)
+        self.assertEqual(matching, [])
+        self.assertEqual(missing, [])
