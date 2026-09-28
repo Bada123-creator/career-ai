@@ -155,6 +155,55 @@ def calculate_education_score(resume, job):
     )
 
 
+
+def calculate_scoring_summary(scores):
+    """
+    Calcule un score de compatibilité pondéré sur 100.
+
+    Une dimension non évaluable ne reçoit aucun point et son poids
+    n'est pas redistribué aux autres dimensions.
+
+    coverage_score indique la proportion du modèle qui a réellement
+    pu être évaluée.
+    """
+    weights = {
+        "skill_score": 0.60,
+        "experience_score": 0.25,
+        "education_score": 0.15,
+    }
+
+    available = {
+        key: value
+        for key, value in scores.items()
+        if value is not None
+    }
+
+    coverage_score = round(
+        sum(weights[key] for key in available) * 100,
+        2,
+    )
+
+    overall_score = round(
+        sum(
+            value * weights[key]
+            for key, value in available.items()
+        ),
+        2,
+    )
+
+    if coverage_score >= 80:
+        confidence_level = "high"
+    elif coverage_score >= 50:
+        confidence_level = "medium"
+    else:
+        confidence_level = "low"
+
+    return {
+        "overall_score": overall_score,
+        "coverage_score": coverage_score,
+        "confidence_level": confidence_level,
+    }
+
 def calculate_overall_score(scores):
     weights = {
         "skill_score": 0.60,
@@ -290,12 +339,14 @@ def match_resume_to_job(resume, job):
         "education_score": education_score,
     }
 
-    overall_score = calculate_overall_score(
+    scoring = calculate_scoring_summary(
         scores
     )
 
     result = {
-        "overall_score": overall_score,
+        "overall_score": scoring["overall_score"],
+        "coverage_score": scoring["coverage_score"],
+        "confidence_level": scoring["confidence_level"],
         "skill_score": skill_score,
         "experience_score": experience_score,
         "education_score": education_score,

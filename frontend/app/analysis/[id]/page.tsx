@@ -585,20 +585,66 @@ export default function AnalysisDetailPage() {
               </p>
             </div>
 
-            <div className="flex h-40 w-40 shrink-0 flex-col items-center justify-center rounded-full border border-white/10 bg-black/30">
-              <span className="text-4xl font-bold">
-                {analysis.matching.overall_score.toFixed(
-                  1
-                )}
-                %
-              </span>
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex h-40 w-40 shrink-0 flex-col items-center justify-center rounded-full border border-white/10 bg-black/30">
+                <span className="text-4xl font-bold">
+                  {analysis.matching.overall_score.toFixed(
+                    1
+                  )}
+                  %
+                </span>
 
-              <span className="mt-1 text-xs uppercase tracking-wider text-zinc-500">
-                Score global
-              </span>
+                <span className="mt-1 max-w-28 text-center text-xs uppercase tracking-wider text-zinc-500">
+                  Score de compatibilité
+                </span>
+              </div>
+
+              <div className="text-center text-sm">
+                <p className="text-zinc-300">
+                  Couverture de l&apos;analyse :{" "}
+                  <span className="font-semibold text-white">
+                    {analysis.matching.coverage_score.toFixed(
+                      0
+                    )}
+                    %
+                  </span>
+                </p>
+
+                <p className="mt-1 text-zinc-400">
+                  Fiabilité :{" "}
+                  <span className="font-medium text-white">
+                    {analysis.matching.confidence_level ===
+                    "high"
+                      ? "élevée"
+                      : analysis.matching
+                            .confidence_level ===
+                          "medium"
+                        ? "moyenne"
+                        : "faible"}
+                  </span>
+                </p>
+              </div>
             </div>
           </div>
         </section>
+
+        {analysis.matching.coverage_score < 50 && (
+          <section className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-5">
+            <p className="font-semibold text-amber-200">
+              Données insuffisantes pour une estimation globale fiable
+            </p>
+
+            <p className="mt-2 text-sm leading-6 text-amber-100/70">
+              Le score ci-dessus porte uniquement sur les
+              critères que CareerAI a pu évaluer. La couverture
+              actuelle est de{" "}
+              {analysis.matching.coverage_score.toFixed(0)} %.
+              L&apos;offre peut contenir trop peu
+              d&apos;informations sur les compétences, la
+              formation ou l&apos;expérience attendue.
+            </p>
+          </section>
+        )}
 
 
         <section className="mt-6 grid gap-4 md:grid-cols-3">
