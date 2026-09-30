@@ -21,6 +21,8 @@ export type Analysis = {
     education_score: number | null;
     matching_skills: string[];
     missing_skills: string[];
+    essential_skills: string[];
+    complementary_skills: string[];
   };
   ai_available: boolean;
   ai_analysis: {

@@ -18,6 +18,7 @@ from .views import (
     interview_preparation_detail,
     interview_preparation_history,
     job_recommendations,
+    job_match_preview,
     match_resume_job,
     skills_gap,
 )
@@ -38,6 +39,11 @@ urlpatterns = [
         "job-recommendations/",
         job_recommendations,
         name="job_recommendations",
+    ),
+    path(
+        "job-match-preview/",
+        job_match_preview,
+        name="job_match_preview",
     ),
     path(
         "skills-gap/",

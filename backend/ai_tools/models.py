@@ -60,6 +60,16 @@ class Analysis(models.Model):
         blank=True,
     )
 
+    essential_skills = models.JSONField(
+        default=list,
+        blank=True,
+    )
+
+    complementary_skills = models.JSONField(
+        default=list,
+        blank=True,
+    )
+
     missing_skills = models.JSONField(
         default=list,
         blank=True,

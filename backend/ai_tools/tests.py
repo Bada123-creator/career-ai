@@ -391,3 +391,444 @@ class AnalysisEngineV3Tests(APITestCase):
         self.assertIsNone(score)
         self.assertEqual(matching, [])
         self.assertEqual(missing, [])
+
+
+
+class AnalysisPersistenceV32Tests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from cvs.models import Resume
+        from jobs.models import Job
+
+        User = get_user_model()
+
+        self.user = User.objects.create_user(
+            username="v32-user",
+            password="test-password-v32",
+        )
+
+        self.resume = Resume.objects.create(
+            user=self.user,
+            title="CV V3.2",
+            extracted_text=(
+                "Python SQL Django API REST Git"
+            ),
+            skills=(
+                "Python, SQL, Django, API REST, Git"
+            ),
+        )
+
+        self.job = Job.objects.create(
+            user=self.user,
+            company="DataNova Test",
+            title="Data Analyst Junior",
+            description=(
+                "Automatiser les traitements avec Python. "
+                "Interroger les bases de données avec SQL. "
+                "Réaliser des reportings avec Excel. "
+                "Concevoir des tableaux de bord avec Power BI. "
+                "Une connaissance de Django constitue un plus."
+            ),
+        )
+
+        self.client.force_authenticate(
+            user=self.user
+        )
+
+    def test_match_persists_skill_classification(self):
+        from ai_tools.models import Analysis
+
+        response = self.client.post(
+            "/api/ai/match/",
+            {
+                "resume_id": self.resume.id,
+                "job_id": self.job.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            201,
+        )
+
+        analysis = Analysis.objects.get(
+            id=response.data["id"]
+        )
+
+        self.assertEqual(
+            analysis.essential_skills,
+            [
+                "Python",
+                "SQL",
+                "Excel",
+                "Power BI",
+            ],
+        )
+
+        self.assertEqual(
+            analysis.complementary_skills,
+            ["Django"],
+        )
+
+    def test_analysis_api_exposes_skill_classification(self):
+        from ai_tools.models import Analysis
+
+        analysis = Analysis.objects.create(
+            user=self.user,
+            resume=self.resume,
+            job=self.job,
+            overall_score=70,
+            coverage_score=60,
+            confidence_level="medium",
+            skill_score=65,
+            matching_skills=[
+                "Python",
+                "SQL",
+                "Django",
+            ],
+            missing_skills=[
+                "Excel",
+                "Power BI",
+            ],
+            essential_skills=[
+                "Python",
+                "SQL",
+                "Excel",
+                "Power BI",
+            ],
+            complementary_skills=[
+                "Django",
+            ],
+        )
+
+        response = self.client.get(
+            f"/api/ai/analyses/{analysis.id}/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        matching = response.data["matching"]
+
+        self.assertEqual(
+            matching["essential_skills"],
+            [
+                "Python",
+                "SQL",
+                "Excel",
+                "Power BI",
+            ],
+        )
+
+        self.assertEqual(
+            matching["complementary_skills"],
+            ["Django"],
+        )
+
+
+class MatchingEngineV2Tests(APITestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from cvs.models import Resume
+        from jobs.models import Job
+
+        User = get_user_model()
+
+        self.user = User.objects.create_user(
+            username="matching-v2-user",
+            password="test-password",
+        )
+
+        self.resume = Resume.objects.create(
+            user=self.user,
+            title="CV Matching V2",
+            extracted_text=(
+                "Python SQL Power BI Licence MIAGE "
+                "Développement informatique"
+            ),
+            skills="Python, SQL, Power BI",
+            experience=(
+                "Mai 2026 – Juil. 2026 | "
+                "Stagiaire Data / Qualité des données"
+            ),
+            education=(
+                "2024–2026 | Université Paris Nanterre\n"
+                "Licence MIASHS, parcours MIAGE – Diplôme validé"
+            ),
+        )
+
+    def test_experience_does_not_use_whole_cv(self):
+        from ai_tools.services import calculate_experience_score
+        from jobs.models import Job
+
+        job = Job.objects.create(
+            user=self.user,
+            company="Test",
+            title="Data Analyst",
+            description=(
+                "Analyser les données avec Python, SQL "
+                "et créer des tableaux de bord Power BI."
+            ),
+        )
+
+        score = calculate_experience_score(
+            self.resume,
+            job,
+        )
+
+        # Python, SQL et Power BI présents ailleurs dans le CV
+        # ne doivent pas devenir automatiquement des preuves
+        # d'expérience.
+        self.assertLess(score, 100.0)
+
+    def test_licence_matches_bac3(self):
+        from ai_tools.services import calculate_education_score
+        from jobs.models import Job
+
+        job = Job.objects.create(
+            user=self.user,
+            company="Test",
+            title="Data Analyst",
+            description="Formation Bac+3 minimum.",
+        )
+
+        score = calculate_education_score(
+            self.resume,
+            job,
+        )
+
+        self.assertEqual(score, 100.0)
+
+    def test_licence_does_not_fully_match_bac5(self):
+        from ai_tools.services import calculate_education_score
+        from jobs.models import Job
+
+        job = Job.objects.create(
+            user=self.user,
+            company="Test",
+            title="Data Analyst",
+            description="Formation Bac+5 / Master requise.",
+        )
+
+        score = calculate_education_score(
+            self.resume,
+            job,
+        )
+
+        self.assertEqual(score, 25.0)
+
+    def test_future_engineering_studies_are_not_inferred(self):
+        from ai_tools.services import calculate_education_score
+        from jobs.models import Job
+
+        self.resume.extracted_text += (
+            "\n2026–2027 ESIEE Paris "
+            "Cycle Ingénieur admission conditionnée"
+        )
+        self.resume.save()
+
+        job = Job.objects.create(
+            user=self.user,
+            company="Test",
+            title="Data Analyst",
+            description="Diplôme d'ingénieur requis.",
+        )
+
+        score = calculate_education_score(
+            self.resume,
+            job,
+        )
+
+        self.assertEqual(score, 25.0)
+
+
+class JobMatchPreviewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="preview_user",
+            password="StrongPass123!",
+        )
+
+        self.other_user = User.objects.create_user(
+            username="preview_other_user",
+            password="StrongPass123!",
+        )
+
+        self.resume = Resume.objects.create(
+            user=self.user,
+            title="CV Data",
+            extracted_text="Python SQL Django",
+            skills="Python, SQL, Django",
+        )
+
+        self.other_resume = Resume.objects.create(
+            user=self.other_user,
+            title="CV autre utilisateur",
+            extracted_text="Java",
+            skills="Java",
+        )
+
+        self.client.force_authenticate(
+            user=self.user
+        )
+
+    def test_preview_returns_expected_skill_score(self):
+        response = self.client.post(
+            "/api/ai/job-match-preview/",
+            {
+                "resume_id": self.resume.id,
+                "jobs": [
+                    {
+                        "external_id": "job-1",
+                        "title": "Data Analyst",
+                        "description": (
+                            "Maîtrise de Python et SQL obligatoire. "
+                            "Power BI serait un plus."
+                        ),
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(
+            response.data["basis"],
+            "skills_only",
+        )
+
+        preview = response.data["previews"][0]
+
+        self.assertEqual(
+            preview["external_id"],
+            "job-1",
+        )
+        self.assertEqual(
+            preview["score"],
+            80.0,
+        )
+        self.assertEqual(
+            preview["matching_skills"],
+            ["Python", "SQL"],
+        )
+        self.assertEqual(
+            preview["missing_skills"],
+            ["Power BI"],
+        )
+        self.assertEqual(
+            preview["essential_skills"],
+            ["Python", "SQL"],
+        )
+        self.assertEqual(
+            preview["complementary_skills"],
+            ["Power BI"],
+        )
+
+    def test_preview_processes_multiple_jobs(self):
+        response = self.client.post(
+            "/api/ai/job-match-preview/",
+            {
+                "resume_id": self.resume.id,
+                "jobs": [
+                    {
+                        "external_id": "job-python",
+                        "title": "Python Developer",
+                        "description": (
+                            "Python obligatoire."
+                        ),
+                    },
+                    {
+                        "external_id": "job-java",
+                        "title": "Java Developer",
+                        "description": (
+                            "Java obligatoire."
+                        ),
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(
+            len(response.data["previews"]),
+            2,
+        )
+
+    def test_preview_rejects_empty_jobs(self):
+        response = self.client.post(
+            "/api/ai/job-match-preview/",
+            {
+                "resume_id": self.resume.id,
+                "jobs": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_preview_rejects_more_than_twenty_jobs(self):
+        jobs = [
+            {
+                "external_id": f"job-{index}",
+                "title": "Data Analyst",
+                "description": "Python SQL",
+            }
+            for index in range(21)
+        ]
+
+        response = self.client.post(
+            "/api/ai/job-match-preview/",
+            {
+                "resume_id": self.resume.id,
+                "jobs": jobs,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_preview_rejects_another_users_resume(self):
+        response = self.client.post(
+            "/api/ai/job-match-preview/",
+            {
+                "resume_id": self.other_resume.id,
+                "jobs": [
+                    {
+                        "external_id": "job-1",
+                        "title": "Data Analyst",
+                        "description": "Python SQL",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_preview_requires_authentication(self):
+        self.client.force_authenticate(
+            user=None
+        )
+
+        response = self.client.post(
+            "/api/ai/job-match-preview/",
+            {
+                "resume_id": self.resume.id,
+                "jobs": [
+                    {
+                        "external_id": "job-1",
+                        "title": "Data Analyst",
+                        "description": "Python SQL",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)

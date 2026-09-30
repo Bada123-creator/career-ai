@@ -223,26 +223,45 @@ def extract_skills(text):
 
 
 def extract_education(text):
+    if not text:
+        return []
+
     education_keywords = [
-        "Licence",
-        "Master",
-        "Bachelor",
-        "Baccalauréat",
-        "Université",
-        "École",
-        "Diplôme",
+        "licence",
+        "master",
+        "bachelor",
+        "baccalauréat",
+        "université",
+        "école",
+        "diplôme",
+        "miage",
+    ]
+
+    exclusion_markers = [
+        "je recherche",
+        "recherche une alternance",
+        "recherche un stage",
+        "objectif professionnel",
     ]
 
     results = []
 
-    for line in text.splitlines():
-        line = line.strip()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
 
         if not line:
             continue
 
+        normalized = line.lower()
+
         if any(
-            keyword.lower() in line.lower()
+            marker in normalized
+            for marker in exclusion_markers
+        ):
+            continue
+
+        if any(
+            keyword in normalized
             for keyword in education_keywords
         ):
             results.append(line)
@@ -251,30 +270,90 @@ def extract_education(text):
 
 
 def extract_experience(text):
-    experience_keywords = [
-        "Stagiaire",
-        "Stage",
-        "Employé",
-        "Agent",
-        "Alternance",
-        "Apprenti",
-        "Développeur",
-        "Data Analyst",
-        "Data Engineer",
+    """
+    Extrait les expériences professionnelles et leurs missions.
+
+    Une expérience commence lorsqu'une ligne contient un intitulé
+    professionnel reconnu. Les lignes suivantes sont conservées
+    comme missions jusqu'au prochain bloc daté.
+
+    Les projets académiques/personnels ne sont pas absorbés.
+    """
+    import re
+
+    if not text:
+        return []
+
+    professional_roles = [
+        r"\bstagiaire\b",
+        r"\bemploy[eé]e?\b",
+        r"\bagent\b",
+        r"\bapprenti(?:e)?s?\b",
+        r"\bd[eé]veloppeur(?:se)?\b",
+        r"\bdata\s+analyst\b",
+        r"\bdata\s+engineer\b",
+    ]
+
+    exclusion_markers = [
+        "je recherche",
+        "recherche une alternance",
+        "recherche un stage",
+        "admission conditionnée",
+        "contrat d'apprentissage",
+        "cycle ingénieur",
+    ]
+
+    # Détecte le début d'un nouveau bloc chronologique.
+    date_markers = [
+        r"\b(?:janv|f[eé]v|mars|avr|mai|juin|juil|ao[uû]t|sept|oct|nov|d[eé]c)\.?\b",
+        r"\bdepuis\b",
+        r"\b20\d{2}\b",
+    ]
+
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
     ]
 
     results = []
+    collecting = False
 
-    for line in text.splitlines():
-        line = line.strip()
-
-        if not line:
-            continue
+    def is_professional_start(line):
+        normalized = line.lower()
 
         if any(
-            keyword.lower() in line.lower()
-            for keyword in experience_keywords
+            marker in normalized
+            for marker in exclusion_markers
         ):
+            return False
+
+        return any(
+            re.search(pattern, normalized)
+            for pattern in professional_roles
+        )
+
+    def looks_like_new_dated_block(line):
+        normalized = line.lower()
+
+        return any(
+            re.search(pattern, normalized)
+            for pattern in date_markers
+        )
+
+    for line in lines:
+        if is_professional_start(line):
+            collecting = True
+            results.append(line)
+            continue
+
+        if collecting and looks_like_new_dated_block(line):
+            # Un nouveau bloc daté qui n'est pas reconnu comme
+            # expérience professionnelle marque la fin de la section
+            # d'expérience actuellement collectée.
+            collecting = False
+
+        if collecting:
             results.append(line)
 
     return results

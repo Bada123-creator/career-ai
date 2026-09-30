@@ -309,3 +309,221 @@ class JobCreateEnrichmentResilienceTests(APITestCase):
             job.source_url,
             "https://example.com/job",
         )
+
+
+class JobSearchV2Tests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="job_search_v2_user",
+            password="StrongPass123!",
+        )
+        self.client.force_authenticate(user=self.user)
+
+    @patch("jobs.job_search_service.requests.get")
+    def test_search_forwards_filters_to_adzuna(
+        self,
+        mock_get,
+    ):
+        mock_response = mock_get.return_value
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "count": 1,
+            "results": [
+                {
+                    "id": "123",
+                    "title": "Data Analyst Alternance",
+                    "company": {
+                        "display_name": "CareerAI Test"
+                    },
+                    "location": {
+                        "display_name": "Paris"
+                    },
+                    "description": "Python SQL",
+                    "redirect_url": "https://example.com/job/123",
+                    "created": "2026-09-29T08:00:00Z",
+                }
+            ],
+        }
+
+        response = self.client.get(
+            "/api/jobs/search/",
+            {
+                "query": "Data Analyst",
+                "location": "Paris",
+                "contract_type": "alternance",
+                "sort_by": "relevance",
+                "page": 2,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["page"], 2)
+        self.assertEqual(
+            response.data["contract_type"],
+            "alternance",
+        )
+        self.assertEqual(
+            response.data["sort_by"],
+            "relevance",
+        )
+
+        _, kwargs = mock_get.call_args
+        params = kwargs["params"]
+
+        self.assertEqual(
+            params["what"],
+            "Data Analyst alternance",
+        )
+        self.assertEqual(params["where"], "Paris")
+        self.assertEqual(
+            params["sort_by"],
+            "relevance",
+        )
+
+    @patch("jobs.job_search_service.requests.get")
+    def test_search_normalizes_external_job(
+        self,
+        mock_get,
+    ):
+        mock_response = mock_get.return_value
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "count": 1,
+            "results": [
+                {
+                    "id": 456,
+                    "title": "Data Engineer",
+                    "company": {
+                        "display_name": "Entreprise Test"
+                    },
+                    "location": {
+                        "display_name": "Lyon"
+                    },
+                    "description": "Python et SQL.",
+                    "redirect_url": "https://example.com/job/456",
+                    "created": "2026-09-29T09:00:00Z",
+                }
+            ],
+        }
+
+        response = self.client.get(
+            "/api/jobs/search/",
+            {
+                "query": "Data Engineer",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        job = response.data["results"][0]
+
+        self.assertEqual(job["external_id"], "456")
+        self.assertEqual(job["title"], "Data Engineer")
+        self.assertEqual(
+            job["company"],
+            "Entreprise Test",
+        )
+        self.assertEqual(job["location"], "Lyon")
+        self.assertEqual(
+            job["source_url"],
+            "https://example.com/job/456",
+        )
+
+    def test_search_rejects_invalid_contract(self):
+        response = self.client.get(
+            "/api/jobs/search/",
+            {
+                "query": "Data Analyst",
+                "contract_type": "freelance-invalid",
+            },
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.data["detail"],
+            "Type de contrat invalide.",
+        )
+
+    def test_search_rejects_invalid_sort(self):
+        response = self.client.get(
+            "/api/jobs/search/",
+            {
+                "query": "Data Analyst",
+                "sort_by": "unknown",
+            },
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.data["detail"],
+            "Type de tri invalide.",
+        )
+
+
+class ContractDetectionTests(APITestCase):
+    def test_detects_alternance(self):
+        from .job_search_service import detect_contract_type
+
+        self.assertEqual(
+            detect_contract_type(
+                "Data Analyst H/F en alternance",
+                "",
+            ),
+            "alternance",
+        )
+
+    def test_detects_apprentissage_as_alternance(self):
+        from .job_search_service import detect_contract_type
+
+        self.assertEqual(
+            detect_contract_type(
+                "Data Engineer",
+                "Contrat d'apprentissage de 24 mois.",
+            ),
+            "alternance",
+        )
+
+    def test_detects_stage(self):
+        from .job_search_service import detect_contract_type
+
+        self.assertEqual(
+            detect_contract_type(
+                "Stage Data Analyst",
+                "Stage de 6 mois.",
+            ),
+            "stage",
+        )
+
+    def test_detects_cdi(self):
+        from .job_search_service import detect_contract_type
+
+        self.assertEqual(
+            detect_contract_type(
+                "Data Engineer CDI",
+                "Poste basé à Paris.",
+            ),
+            "cdi",
+        )
+
+    def test_detects_cdd(self):
+        from .job_search_service import detect_contract_type
+
+        self.assertEqual(
+            detect_contract_type(
+                "Data Analyst CDD",
+                "Mission de 12 mois.",
+            ),
+            "cdd",
+        )
+
+    def test_returns_unknown_when_contract_is_missing(self):
+        from .job_search_service import detect_contract_type
+
+        self.assertEqual(
+            detect_contract_type(
+                "Data Analyst",
+                "Python SQL Power BI.",
+            ),
+            "unknown",
+        )

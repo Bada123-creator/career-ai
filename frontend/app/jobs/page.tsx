@@ -2,6 +2,7 @@
 
 import axios from "axios";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   BriefcaseBusiness,
@@ -17,6 +18,14 @@ import {
 
 import AppNavbar from "@/components/navigation/AppNavbar";
 import {
+  getResumes,
+  type Resume,
+} from "@/lib/api/resumes";
+import {
+  previewJobMatches,
+  type JobMatchPreview,
+} from "@/lib/api/job-match-preview";
+import {
   createJob,
   deleteJob,
   getJobs,
@@ -24,7 +33,9 @@ import {
   searchJobs,
   ExternalJob,
   Job,
+  JobContractType,
   JobImportPreview,
+  JobSortBy,
 } from "@/lib/api/jobs";
 
 function formatDate(value: string) {
@@ -35,7 +46,54 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatJobAge(value: string) {
+  if (!value) {
+    return null;
+  }
+
+  const created = new Date(value);
+
+  if (Number.isNaN(created.getTime())) {
+    return null;
+  }
+
+  const now = new Date();
+
+  const createdDay = new Date(
+    created.getFullYear(),
+    created.getMonth(),
+    created.getDate()
+  );
+
+  const today = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+
+  const differenceInDays = Math.floor(
+    (today.getTime() - createdDay.getTime()) /
+      (1000 * 60 * 60 * 24)
+  );
+
+  if (differenceInDays <= 0) {
+    return "Aujourd’hui";
+  }
+
+  if (differenceInDays === 1) {
+    return "Hier";
+  }
+
+  if (differenceInDays < 7) {
+    return `Il y a ${differenceInDays} jours`;
+  }
+
+  return formatDate(value);
+}
+
 export default function JobsPage() {
+  const router = useRouter();
+
   const [jobs, setJobs] = useState<Job[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -56,16 +114,39 @@ export default function JobsPage() {
     useState("");
   const [jobSearchLocation, setJobSearchLocation] =
     useState("");
+  const [jobSearchContract, setJobSearchContract] =
+    useState<JobContractType>("");
+  const [jobSearchSort, setJobSearchSort] =
+    useState<JobSortBy>("date");
   const [jobSearchResults, setJobSearchResults] =
     useState<ExternalJob[]>([]);
   const [jobSearchTotal, setJobSearchTotal] =
     useState<number | null>(null);
+  const [jobSearchPage, setJobSearchPage] =
+    useState(1);
   const [jobSearching, setJobSearching] =
     useState(false);
   const [jobSearchError, setJobSearchError] =
     useState<string | null>(null);
   const [savingExternalId, setSavingExternalId] =
     useState<string | null>(null);
+
+  const [resumes, setResumes] =
+    useState<Resume[]>([]);
+  const [selectedResumeId, setSelectedResumeId] =
+    useState<number | null>(null);
+  const [jobMatchPreviews, setJobMatchPreviews] =
+    useState<Record<string, JobMatchPreview>>({});
+  const [previewLoading, setPreviewLoading] =
+    useState(false);
+
+  const jobSearchTotalPages =
+    jobSearchTotal === null
+      ? 0
+      : Math.max(
+          1,
+          Math.ceil(jobSearchTotal / 10)
+        );
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +176,52 @@ export default function JobsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    getResumes()
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+
+        setResumes(data);
+
+        if (data.length > 0) {
+          setSelectedResumeId((current) =>
+            current ?? data[0].id
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResumes([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const savedJobsByUrl = useMemo(
+    () =>
+      new Map(
+        jobs
+          .filter((job) => job.source_url)
+          .map((job) => [
+            job.source_url,
+            job,
+          ])
+      ),
+    [jobs]
+  );
+
+  const savedJobUrls = useMemo(
+    () => new Set(savedJobsByUrl.keys()),
+    [savedJobsByUrl]
+  );
+
   const filteredJobs = useMemo(() => {
     const query = search.trim().toLowerCase();
 
@@ -114,7 +241,7 @@ export default function JobsPage() {
     );
   }, [jobs, search]);
 
-  async function handleJobSearch() {
+  async function handleJobSearch(page = 1) {
     const query = jobSearchQuery.trim();
 
     if (!query) {
@@ -128,13 +255,48 @@ export default function JobsPage() {
       setJobSearching(true);
       setJobSearchError(null);
 
-      const data = await searchJobs(
+      const data = await searchJobs({
         query,
-        jobSearchLocation.trim()
-      );
+        location: jobSearchLocation.trim(),
+        page,
+        contractType: jobSearchContract,
+        sortBy: jobSearchSort,
+      });
 
       setJobSearchResults(data.results);
       setJobSearchTotal(data.count);
+      setJobSearchPage(data.page);
+      setJobMatchPreviews({});
+
+      if (
+        selectedResumeId !== null &&
+        data.results.length > 0
+      ) {
+        try {
+          setPreviewLoading(true);
+
+          const previewData =
+            await previewJobMatches(
+              selectedResumeId,
+              data.results
+            );
+
+          setJobMatchPreviews(
+            Object.fromEntries(
+              previewData.previews.map(
+                (preview) => [
+                  preview.external_id,
+                  preview,
+                ]
+              )
+            )
+          );
+        } catch {
+          setJobMatchPreviews({});
+        } finally {
+          setPreviewLoading(false);
+        }
+      }
     } catch (err) {
       if (axios.isAxiosError(err)) {
         const detail = err.response?.data?.detail;
@@ -175,19 +337,37 @@ export default function JobsPage() {
         ...current,
       ]);
 
-      setJobSearchResults((current) =>
-        current.filter(
-          (item) =>
-            item.external_id !==
-            externalJob.external_id
-        )
-      );
+      return job;
     } catch {
       setJobSearchError(
         "Impossible d'enregistrer cette offre."
       );
     } finally {
       setSavingExternalId(null);
+    }
+  }
+
+  async function handleSaveAndAnalyze(
+    externalJob: ExternalJob
+  ) {
+    const savedJob = savedJobsByUrl.get(
+      externalJob.source_url
+    );
+
+    if (savedJob) {
+      router.push(
+        `/analysis/new?job=${savedJob.id}`
+      );
+      return;
+    }
+
+    const createdJob =
+      await handleSaveExternalJob(externalJob);
+
+    if (createdJob) {
+      router.push(
+        `/analysis/new?job=${createdJob.id}`
+      );
     }
   }
 
@@ -397,7 +577,52 @@ export default function JobsPage() {
             </p>
           </div>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+          <div className="mt-5 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-medium text-white">
+                  Pré-matching avec mon CV
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Estimation rapide basée uniquement sur les compétences.
+                  Le score final est calculé lors de l&apos;analyse complète.
+                </p>
+              </div>
+
+              {resumes.length > 0 ? (
+                <select
+                  value={selectedResumeId ?? ""}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+
+                    setSelectedResumeId(
+                      Number.isNaN(value) ? null : value
+                    );
+                    setJobMatchPreviews({});
+                  }}
+                  className="min-w-64 rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                >
+                  {resumes.map((resume) => (
+                    <option
+                      key={resume.id}
+                      value={resume.id}
+                    >
+                      {resume.title}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Link
+                  href="/resumes"
+                  className="text-sm font-medium text-blue-400 hover:text-blue-300"
+                >
+                  Ajouter un CV
+                </Link>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1fr_0.8fr_0.8fr_auto]">
             <input
               value={jobSearchQuery}
               onChange={(event) =>
@@ -431,6 +656,35 @@ export default function JobsPage() {
               placeholder="Ex. Paris"
               className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
             />
+
+            <select
+              value={jobSearchContract}
+              onChange={(event) =>
+                setJobSearchContract(
+                  event.target.value as JobContractType
+                )
+              }
+              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+            >
+              <option value="">Tous les contrats</option>
+              <option value="alternance">Alternance</option>
+              <option value="stage">Stage</option>
+              <option value="cdi">CDI</option>
+              <option value="cdd">CDD</option>
+            </select>
+
+            <select
+              value={jobSearchSort}
+              onChange={(event) =>
+                setJobSearchSort(
+                  event.target.value as JobSortBy
+                )
+              }
+              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+            >
+              <option value="date">Plus récentes</option>
+              <option value="relevance">Pertinence</option>
+            </select>
 
             <button
               type="button"
@@ -467,6 +721,23 @@ export default function JobsPage() {
             </p>
           )}
 
+          {jobSearchTotal === 0 &&
+            !jobSearching &&
+            !jobSearchError && (
+              <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/60 px-6 py-8 text-center">
+                <BriefcaseBusiness className="mx-auto h-8 w-8 text-slate-500" />
+
+                <h3 className="mt-3 font-medium text-white">
+                  Aucune offre trouvée
+                </h3>
+
+                <p className="mt-2 text-sm text-slate-400">
+                  Essayez un autre intitulé, une autre
+                  localisation ou élargissez vos filtres.
+                </p>
+              </div>
+            )}
+
           {jobSearchResults.length > 0 && (
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
               {jobSearchResults.map(
@@ -492,11 +763,122 @@ export default function JobsPage() {
                           {externalJob.location}
                         </span>
                       )}
+
+                      {formatJobAge(externalJob.created) && (
+                        <span>
+                          📅 {formatJobAge(externalJob.created)}
+                        </span>
+                      )}
+
+                      <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 font-medium text-slate-300">
+                        {externalJob.contract_type_detected ===
+                        "alternance"
+                          ? "Alternance"
+                          : externalJob.contract_type_detected ===
+                              "stage"
+                            ? "Stage"
+                            : externalJob.contract_type_detected ===
+                                "cdi"
+                              ? "CDI"
+                              : externalJob.contract_type_detected ===
+                                  "cdd"
+                                ? "CDD"
+                                : "Contrat non précisé"}
+                      </span>
                     </div>
 
                     <p className="mt-4 line-clamp-4 text-sm leading-6 text-slate-400">
                       {externalJob.description}
                     </p>
+
+                    {previewLoading &&
+                    selectedResumeId !== null ? (
+                      <div className="mt-4 flex items-center gap-2 text-xs text-slate-400">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Pré-matching en cours...
+                      </div>
+                    ) : jobMatchPreviews[
+                        externalJob.external_id
+                      ] ? (
+                      <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs text-slate-400">
+                              Compatibilité compétences
+                            </p>
+
+                            <p className="mt-1 text-lg font-semibold text-white">
+                              {jobMatchPreviews[
+                                externalJob.external_id
+                              ].score === null
+                                ? "Non évaluable"
+                                : `${jobMatchPreviews[
+                                    externalJob.external_id
+                                  ].score?.toFixed(0)} %`}
+                            </p>
+                          </div>
+
+                          <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
+                            Estimation rapide
+                          </span>
+                        </div>
+
+                        {jobMatchPreviews[
+                          externalJob.external_id
+                        ].matching_skills.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-xs font-medium text-emerald-300">
+                              Compétences correspondantes
+                            </p>
+
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {jobMatchPreviews[
+                                externalJob.external_id
+                              ].matching_skills.map(
+                                (skill) => (
+                                  <span
+                                    key={skill}
+                                    className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2.5 py-1 text-xs text-emerald-300"
+                                  >
+                                    {skill}
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {jobMatchPreviews[
+                          externalJob.external_id
+                        ].missing_skills.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-xs font-medium text-amber-300">
+                              Compétences à vérifier
+                            </p>
+
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {jobMatchPreviews[
+                                externalJob.external_id
+                              ].missing_skills.map(
+                                (skill) => (
+                                  <span
+                                    key={skill}
+                                    className="rounded-full border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-xs text-amber-300"
+                                  >
+                                    {skill}
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="mt-3 text-[11px] leading-5 text-slate-500">
+                          Pré-score basé uniquement sur les compétences
+                          détectées. Expérience et formation non évaluées ici.
+                        </p>
+                      </div>
+                    ) : null}
 
                     <div className="mt-5 flex flex-wrap gap-2">
                       <a
@@ -509,32 +891,107 @@ export default function JobsPage() {
                         Voir l&apos;offre
                       </a>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void handleSaveExternalJob(
-                            externalJob
-                          )
-                        }
-                        disabled={
-                          savingExternalId ===
-                          externalJob.external_id
-                        }
-                        className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-xs font-medium transition hover:bg-violet-500 disabled:opacity-50"
-                      >
-                        {savingExternalId ===
-                        externalJob.external_id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Plus className="h-3.5 w-3.5" />
-                        )}
+                      {savedJobUrls.has(
+                        externalJob.source_url
+                      ) ? (
+                        <>
+                          <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-800 bg-emerald-950/40 px-4 py-2 text-xs font-medium text-emerald-300">
+                            ✓ Déjà enregistrée
+                          </span>
 
-                        Enregistrer
-                      </button>
+                          <Link
+                            href={`/analysis/new?job=${savedJobsByUrl.get(
+                              externalJob.source_url
+                            )?.id}`}
+                            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-blue-500"
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            Analyser avec mon CV
+                          </Link>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleSaveExternalJob(
+                                externalJob
+                              )
+                            }
+                          disabled={
+                            savingExternalId ===
+                            externalJob.external_id
+                          }
+                          className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-xs font-medium transition hover:bg-violet-500 disabled:opacity-50"
+                        >
+                          {savingExternalId ===
+                          externalJob.external_id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Plus className="h-3.5 w-3.5" />
+                          )}
+
+                          Enregistrer
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleSaveAndAnalyze(
+                              externalJob
+                            )
+                          }
+                          disabled={
+                            savingExternalId ===
+                            externalJob.external_id
+                          }
+                          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Enregistrer et analyser
+                        </button>
+                        </>
+                      )}
                     </div>
                   </article>
                 )
               )}
+            </div>
+          )}
+
+          {jobSearchResults.length > 0 && (
+            <div className="mt-6 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  void handleJobSearch(jobSearchPage - 1)
+                }
+                disabled={
+                  jobSearching || jobSearchPage <= 1
+                }
+                className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ← Précédent
+              </button>
+
+              <span className="text-sm text-slate-400">
+                Page {jobSearchPage} sur{" "}
+                {jobSearchTotalPages}
+              </span>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void handleJobSearch(jobSearchPage + 1)
+                }
+                disabled={
+                  jobSearching ||
+                  jobSearchPage >= jobSearchTotalPages
+                }
+                className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Suivant →
+              </button>
             </div>
           )}
         </section>

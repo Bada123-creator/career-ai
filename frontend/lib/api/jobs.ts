@@ -91,19 +91,48 @@ export type ExternalJob = {
   description: string;
   source_url: string;
   created: string;
+  contract_type_detected:
+    | "alternance"
+    | "stage"
+    | "cdi"
+    | "cdd"
+    | "unknown";
 };
+
+export type JobContractType =
+  | ""
+  | "alternance"
+  | "stage"
+  | "cdi"
+  | "cdd";
+
+export type JobSortBy =
+  | "date"
+  | "relevance";
 
 export type JobSearchResponse = {
   count: number;
   page: number;
+  contract_type: JobContractType;
+  sort_by: JobSortBy;
   results: ExternalJob[];
 };
 
-export async function searchJobs(
-  query: string,
+export type JobSearchParams = {
+  query: string;
+  location?: string;
+  page?: number;
+  contractType?: JobContractType;
+  sortBy?: JobSortBy;
+};
+
+export async function searchJobs({
+  query,
   location = "",
-  page = 1
-): Promise<JobSearchResponse> {
+  page = 1,
+  contractType = "",
+  sortBy = "date",
+}: JobSearchParams): Promise<JobSearchResponse> {
   const response = await api.get<JobSearchResponse>(
     "/jobs/search/",
     {
@@ -111,6 +140,8 @@ export async function searchJobs(
         query,
         location,
         page,
+        contract_type: contractType,
+        sort_by: sortBy,
       },
     }
   );

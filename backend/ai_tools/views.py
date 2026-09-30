@@ -15,7 +15,11 @@ from .models import (
     InterviewReport,
     JobRecommendation,
 )
-from .services import match_resume_to_job, build_skills_gap
+from .services import (
+    match_resume_to_job,
+    build_skills_gap,
+    preview_job_match,
+)
 from .ai_service import (
     analyze_resume_with_ai,
     evaluate_interview_answer_with_ai,
@@ -29,6 +33,101 @@ from .ai_service import (
     get_candidate_profile_context,
 )
 
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def job_match_preview(request):
+    """
+    Pré-évalue plusieurs offres externes avec un CV.
+
+    Le score est basé uniquement sur les compétences.
+    Aucun appel IA et aucune écriture en base.
+    """
+    resume_id = request.data.get("resume_id")
+    jobs = request.data.get("jobs")
+
+    if not resume_id:
+        return Response(
+            {"detail": "resume_id est obligatoire."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not isinstance(jobs, list) or not jobs:
+        return Response(
+            {
+                "detail": (
+                    "jobs doit être une liste non vide."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if len(jobs) > 20:
+        return Response(
+            {
+                "detail": (
+                    "20 offres maximum par pré-évaluation."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        resume = Resume.objects.get(
+            id=resume_id,
+            user=request.user,
+        )
+    except Resume.DoesNotExist:
+        return Response(
+            {"detail": "CV introuvable."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    previews = []
+
+    for job_data in jobs:
+        if not isinstance(job_data, dict):
+            return Response(
+                {
+                    "detail": (
+                        "Chaque offre doit être un objet."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        previews.append(
+            preview_job_match(
+                resume,
+                {
+                    "external_id": job_data.get(
+                        "external_id",
+                        "",
+                    ),
+                    "title": job_data.get(
+                        "title",
+                        "",
+                    ),
+                    "description": job_data.get(
+                        "description",
+                        "",
+                    ),
+                },
+            )
+        )
+
+    return Response(
+        {
+            "resume": {
+                "id": resume.id,
+                "title": resume.title,
+            },
+            "count": len(previews),
+            "basis": "skills_only",
+            "previews": previews,
+        }
+    )
 
 def serialize_analysis(analysis):
     return {
@@ -52,6 +151,8 @@ def serialize_analysis(analysis):
             "education_score": analysis.education_score,
             "matching_skills": analysis.matching_skills,
             "missing_skills": analysis.missing_skills,
+            "essential_skills": analysis.essential_skills,
+            "complementary_skills": analysis.complementary_skills,
         },
         "ai_available": analysis.ai_available,
         "ai_analysis": analysis.ai_analysis,
@@ -153,6 +254,14 @@ def match_resume_job(request):
         ),
         matching_skills=matching.get(
             "matching_skills",
+            [],
+        ),
+        essential_skills=matching.get(
+            "essential_skills",
+            [],
+        ),
+        complementary_skills=matching.get(
+            "complementary_skills",
             [],
         ),
         missing_skills=matching.get(

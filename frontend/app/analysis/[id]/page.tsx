@@ -48,6 +48,57 @@ import {
 } from "@/lib/api/applications";
 
 
+function ApplicationAssistantStep({
+  number,
+  title,
+  completed,
+}: {
+  number: number;
+  title: string;
+  completed: boolean;
+}) {
+  return (
+    <div
+      className={`flex min-w-0 flex-1 items-center gap-3 rounded-xl border px-4 py-3 ${
+        completed
+          ? "border-emerald-500/30 bg-emerald-500/10"
+          : "border-white/10 bg-white/5"
+      }`}
+    >
+      <div
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
+          completed
+            ? "bg-emerald-500 text-white"
+            : "bg-zinc-800 text-zinc-400"
+        }`}
+      >
+        {completed ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : (
+          number
+        )}
+      </div>
+
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-white">
+          {title}
+        </p>
+
+        <p
+          className={`text-xs ${
+            completed
+              ? "text-emerald-300"
+              : "text-zinc-500"
+          }`}
+        >
+          {completed ? "Terminé" : "À faire"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
 function ScoreCard({
   label,
   value,
@@ -67,6 +118,152 @@ function ScoreCard({
           : `${value.toFixed(1)}%`}
       </p>
     </div>
+  );
+}
+
+
+function ScoreBreakdown({
+  skillScore,
+  experienceScore,
+  educationScore,
+  overallScore,
+}: {
+  skillScore: number | null;
+  experienceScore: number | null;
+  educationScore: number | null;
+  overallScore: number;
+}) {
+  const dimensions = [
+    {
+      label: "Compétences",
+      score: skillScore,
+      weight: 60,
+      description:
+        "Correspondance entre les compétences du CV et celles demandées par l'offre.",
+    },
+    {
+      label: "Expérience",
+      score: experienceScore,
+      weight: 25,
+      description:
+        "Correspondance entre l'expérience décrite dans le CV et les besoins du poste.",
+    },
+    {
+      label: "Formation",
+      score: educationScore,
+      weight: 15,
+      description:
+        "Adéquation entre le niveau de formation détecté et celui demandé.",
+    },
+  ];
+
+  return (
+    <section className="mt-6 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6">
+      <div className="flex items-center gap-3">
+        <Target className="h-5 w-5 text-blue-400" />
+
+        <div>
+          <h2 className="text-lg font-semibold text-white">
+            Comprendre mon score
+          </h2>
+
+          <p className="mt-1 text-sm text-zinc-400">
+            Le score global est construit à partir de trois
+            dimensions pondérées.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-6 space-y-4">
+        {dimensions.map((dimension) => {
+          const contribution =
+            dimension.score === null
+              ? null
+              : (dimension.score * dimension.weight) / 100;
+
+          return (
+            <div
+              key={dimension.label}
+              className="rounded-xl border border-white/10 bg-black/20 p-4"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-white">
+                      {dimension.label}
+                    </p>
+
+                    <span className="rounded-full bg-white/5 px-2 py-1 text-xs text-zinc-400">
+                      Poids {dimension.weight} %
+                    </span>
+                  </div>
+
+                  <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">
+                    {dimension.description}
+                  </p>
+                </div>
+
+                <div className="shrink-0 text-left sm:text-right">
+                  {dimension.score === null ? (
+                    <>
+                      <p className="font-semibold text-zinc-400">
+                        Non évaluée
+                      </p>
+
+                      <p className="mt-1 text-xs text-zinc-500">
+                        0 / {dimension.weight} point
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold text-white">
+                        {dimension.score.toFixed(1)} %
+                      </p>
+
+                      <p className="mt-1 text-xs text-blue-300">
+                        {contribution?.toFixed(1)} /{" "}
+                        {dimension.weight} points
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all"
+                  style={{
+                    width: `${
+                      dimension.score === null
+                        ? 0
+                        : Math.min(
+                            100,
+                            Math.max(0, dimension.score)
+                          )
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 flex flex-col gap-2 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-zinc-400">
+          Total des contributions
+        </p>
+
+        <p className="text-xl font-semibold text-white">
+          {overallScore.toFixed(1)} / 100
+        </p>
+      </div>
+
+      <p className="mt-3 text-xs leading-5 text-zinc-500">
+        Une dimension non évaluable ne reçoit aucun point. Son
+        poids n&apos;est pas redistribué aux autres dimensions.
+      </p>
+    </section>
   );
 }
 
@@ -623,8 +820,63 @@ export default function AnalysisDetailPage() {
                         : "faible"}
                   </span>
                 </p>
+
+                <p className="mt-2 max-w-72 text-xs leading-5 text-zinc-500">
+                  La couverture indique la part des critères que
+                  CareerAI a pu évaluer à partir du CV et de
+                  l&apos;offre.
+                </p>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="mb-8 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6">
+          <div className="mb-5">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-blue-400" />
+
+              <h2 className="text-lg font-semibold text-white">
+                Assistant de candidature
+              </h2>
+            </div>
+
+            <p className="mt-2 text-sm text-zinc-400">
+              Suivez les étapes pour préparer votre candidature
+              à {analysis.job.title} chez {analysis.job.company}.
+            </p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <ApplicationAssistantStep
+              number={1}
+              title="Analyse"
+              completed={true}
+            />
+
+            <ApplicationAssistantStep
+              number={2}
+              title="CV optimisé"
+              completed={cvOptimization !== null}
+            />
+
+            <ApplicationAssistantStep
+              number={3}
+              title="Lettre"
+              completed={coverLetter !== null}
+            />
+
+            <ApplicationAssistantStep
+              number={4}
+              title="Candidature"
+              completed={applicationId !== null}
+            />
+
+            <ApplicationAssistantStep
+              number={5}
+              title="Entretien"
+              completed={interviewPreparation !== null}
+            />
           </div>
         </section>
 
@@ -646,6 +898,13 @@ export default function AnalysisDetailPage() {
           </section>
         )}
 
+
+        <ScoreBreakdown
+          skillScore={analysis.matching.skill_score}
+          experienceScore={analysis.matching.experience_score}
+          educationScore={analysis.matching.education_score}
+          overallScore={analysis.matching.overall_score}
+        />
 
         <section className="mt-6 grid gap-4 md:grid-cols-3">
           <ScoreCard
@@ -671,74 +930,182 @@ export default function AnalysisDetailPage() {
         </section>
 
 
-        <section className="mt-6 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <div className="mb-4 flex items-center gap-3">
-              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+        {analysis.matching.essential_skills.length > 0 ||
+        analysis.matching.complementary_skills.length > 0 ? (
+          <section className="mt-6 grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+              <div className="mb-2 flex items-center gap-3">
+                <Target className="h-5 w-5 text-violet-400" />
 
-              <h2 className="text-lg font-semibold">
-                Compétences détectées
-              </h2>
+                <h2 className="text-lg font-semibold">
+                  Compétences essentielles
+                </h2>
+              </div>
+
+              <p className="mb-5 text-sm leading-6 text-zinc-400">
+                Ces compétences ont davantage de poids dans le
+                score de compatibilité.
+              </p>
+
+              <div className="space-y-2">
+                {analysis.matching.essential_skills.map(
+                  (skill) => {
+                    const matched =
+                      analysis.matching.matching_skills.includes(
+                        skill
+                      );
+
+                    return (
+                      <div
+                        key={skill}
+                        className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3"
+                      >
+                        <span className="text-sm font-medium text-zinc-200">
+                          {skill}
+                        </span>
+
+                        {matched ? (
+                          <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-300">
+                            <CheckCircle2 className="h-4 w-4" />
+                            Détectée
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-xs font-medium text-amber-300">
+                            <TriangleAlert className="h-4 w-4" />
+                            Non détectée
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+                )}
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {analysis.matching.matching_skills.length >
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+              <div className="mb-2 flex items-center gap-3">
+                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+
+                <h2 className="text-lg font-semibold">
+                  Compétences complémentaires
+                </h2>
+              </div>
+
+              <p className="mb-5 text-sm leading-6 text-zinc-400">
+                Elles renforcent la candidature, avec un poids
+                inférieur aux compétences essentielles.
+              </p>
+
+              {analysis.matching.complementary_skills.length >
               0 ? (
-                analysis.matching.matching_skills.map(
-                  (skill) => (
-                    <span
-                      key={skill}
-                      className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-300"
-                    >
-                      {skill}
-                    </span>
-                  )
-                )
+                <div className="space-y-2">
+                  {analysis.matching.complementary_skills.map(
+                    (skill) => {
+                      const matched =
+                        analysis.matching.matching_skills.includes(
+                          skill
+                        );
+
+                      return (
+                        <div
+                          key={skill}
+                          className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3"
+                        >
+                          <span className="text-sm font-medium text-zinc-200">
+                            {skill}
+                          </span>
+
+                          {matched ? (
+                            <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-300">
+                              <CheckCircle2 className="h-4 w-4" />
+                              Détectée
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1.5 text-xs font-medium text-amber-300">
+                              <TriangleAlert className="h-4 w-4" />
+                              Non détectée
+                            </span>
+                          )}
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
               ) : (
-                <p className="text-sm text-zinc-400">
-                  Aucune compétence commune détectée.
+                <p className="text-sm text-zinc-500">
+                  Aucune compétence complémentaire identifiée.
                 </p>
               )}
             </div>
-          </div>
 
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <div className="mb-4 flex items-center gap-3">
-              <Target className="h-5 w-5 text-amber-400" />
-
-              <h2 className="text-lg font-semibold">
-                Compétences non détectées
-              </h2>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {analysis.matching.missing_skills.length >
-              0 ? (
-                analysis.matching.missing_skills.map(
-                  (skill) => (
-                    <span
-                      key={skill}
-                      className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-300"
-                    >
-                      {skill}
-                    </span>
-                  )
-                )
-              ) : (
-                <p className="text-sm text-zinc-400">
-                  Aucune compétence manquante détectée.
-                </p>
-              )}
-            </div>
-
-            <p className="mt-4 text-xs leading-5 text-zinc-500">
-              Une compétence non détectée dans le CV ne
-              signifie pas qu&apos;elle n&apos;est pas maîtrisée.
+            <p className="lg:col-span-2 text-xs leading-5 text-zinc-500">
+              Une compétence non détectée dans le CV ne signifie
+              pas nécessairement qu&apos;elle n&apos;est pas
+              maîtrisée. CareerAI se base uniquement sur les
+              informations présentes dans le CV analysé.
             </p>
-          </div>
-        </section>
+          </section>
+        ) : (
+          <section className="mt-6 grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+              <div className="mb-4 flex items-center gap-3">
+                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
 
+                <h2 className="text-lg font-semibold">
+                  Compétences détectées
+                </h2>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {analysis.matching.matching_skills.length > 0 ? (
+                  analysis.matching.matching_skills.map(
+                    (skill) => (
+                      <span
+                        key={skill}
+                        className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-300"
+                      >
+                        {skill}
+                      </span>
+                    )
+                  )
+                ) : (
+                  <p className="text-sm text-zinc-400">
+                    Aucune compétence commune détectée.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+              <div className="mb-4 flex items-center gap-3">
+                <Target className="h-5 w-5 text-amber-400" />
+
+                <h2 className="text-lg font-semibold">
+                  Compétences non détectées
+                </h2>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {analysis.matching.missing_skills.length > 0 ? (
+                  analysis.matching.missing_skills.map(
+                    (skill) => (
+                      <span
+                        key={skill}
+                        className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-300"
+                      >
+                        {skill}
+                      </span>
+                    )
+                  )
+                ) : (
+                  <p className="text-sm text-zinc-400">
+                    Aucune compétence manquante détectée.
+                  </p>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         {ai ? (
           <>

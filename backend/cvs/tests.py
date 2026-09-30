@@ -309,3 +309,144 @@ class SkillsExtractionV2ExtendedTests(APITestCase):
         skills = extract_skills(text)
 
         self.assertNotIn("DAX", skills)
+
+
+class ResumeSectionExtractionV2Tests(APITestCase):
+    def test_experience_ignores_job_search_objective(self):
+        from .services import extract_experience
+
+        text = """
+        Titulaire d'une Licence MIAGE, je recherche une alternance
+        en informatique dans le cadre de mon cycle ingénieur.
+
+        Mai 2026 – Juil. 2026 | Stagiaire Data / Qualité des données
+        – Upskill Handball
+
+        Depuis avr. 2025 | Employé polyvalent – KFC, Paris
+
+        Juil. 2023 – Juin 2025 | Agent d'accueil – RATP-SNCF, Paris
+        """
+
+        result = extract_experience(text)
+
+        self.assertFalse(
+            any(
+                "recherche une alternance" in line.lower()
+                for line in result
+            )
+        )
+
+        self.assertTrue(
+            any("Stagiaire Data" in line for line in result)
+        )
+        self.assertTrue(
+            any("Employé polyvalent" in line for line in result)
+        )
+        self.assertTrue(
+            any("Agent d'accueil" in line for line in result)
+        )
+
+    def test_experience_ignores_future_education(self):
+        from .services import extract_experience
+
+        text = """
+        2026–2027 | ESIEE Paris – Cycle Ingénieur Informatique,
+        apprentissage
+        Admission conditionnée à la signature d'un contrat
+        d'apprentissage
+        """
+
+        result = extract_experience(text)
+
+        self.assertEqual(result, [])
+
+    def test_education_detects_real_education_lines(self):
+        from .services import extract_education
+
+        text = """
+        Titulaire d'une Licence MIAGE, je recherche une alternance.
+
+        2024–2026 | Université Paris Nanterre – Paris
+        Licence MIASHS, parcours MIAGE – Diplôme validé
+
+        2022–2024 | Université de Lorraine – Nancy
+        """
+
+        result = extract_education(text)
+
+        self.assertFalse(
+            any(
+                "je recherche une alternance" in line.lower()
+                for line in result
+            )
+        )
+
+        self.assertTrue(
+            any("Université Paris Nanterre" in line for line in result)
+        )
+        self.assertTrue(
+            any("Licence MIASHS" in line for line in result)
+        )
+        self.assertTrue(
+            any("Université de Lorraine" in line for line in result)
+        )
+
+
+
+class ExperienceExtractionV3Tests(APITestCase):
+    def test_keeps_professional_experience_missions(self):
+        from .services import extract_experience
+
+        text = """
+        Mai 2026 – Juil. 2026 | Stagiaire Data / Qualité des données – Upskill Handball
+        Stage de fin d’année
+        Collecte, validation, normalisation et intégration de données dans le SI
+        Contrôle qualité, détection et correction des incohérences
+        Structuration et fiabilisation de données issues de sources multiples
+        Préparation des données pour leur exploitation analytique et Data/IA
+        Depuis avr. 2025 | Employé polyvalent – KFC, Paris
+        Travail en équipe, relation client, rigueur et gestion des priorités.
+        Juil. 2023 – Juin 2025 | Agent d’accueil – RATP-SNCF, Paris
+        Gestion des flux, accueil du public, respect des procédures.
+        Sept. 2026 – En cours | Career-AI – Plateforme intelligente
+        Python · Django · SQL · Git
+        Développement d’une application web
+        """
+
+        result = extract_experience(text)
+        joined = "\n".join(result)
+
+        self.assertIn("Stagiaire Data", joined)
+        self.assertIn(
+            "Collecte, validation, normalisation",
+            joined,
+        )
+        self.assertIn("Contrôle qualité", joined)
+        self.assertIn("Employé polyvalent", joined)
+        self.assertIn("Travail en équipe", joined)
+        self.assertIn("Agent d’accueil", joined)
+        self.assertIn("Gestion des flux", joined)
+
+    def test_does_not_absorb_projects_after_experience(self):
+        from .services import extract_experience
+
+        text = """
+        Juil. 2023 – Juin 2025 | Agent d’accueil – RATP-SNCF, Paris
+        Gestion des flux et accueil du public.
+        Sept. 2026 – En cours | Career-AI – Plateforme intelligente
+        Python · Django · SQL · Git
+        Développement d’une application web
+        Sept. 2025 – Janv. 2026 | PGI pour une PME | Projet de groupe
+        Analyse des besoins et modélisation
+        """
+
+        result = extract_experience(text)
+        joined = "\n".join(result)
+
+        self.assertIn("Agent d’accueil", joined)
+        self.assertIn("Gestion des flux", joined)
+
+        self.assertNotIn("Career-AI", joined)
+        self.assertNotIn("Python · Django", joined)
+        self.assertNotIn("PGI pour une PME", joined)
+        self.assertNotIn("Analyse des besoins", joined)

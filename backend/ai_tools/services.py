@@ -209,15 +209,42 @@ def calculate_skill_score(
     return score, matching_skills, missing_skills
 
 
+def _contains_experience_term(text, term):
+    """
+    Recherche un terme métier en évitant les correspondances
+    accidentelles à l'intérieur d'autres mots.
+    """
+    import re
+
+    text = (text or "").lower()
+    term = term.lower()
+
+    pattern = (
+        r"(?<!\w)"
+        + re.escape(term)
+        + r"(?!\w)"
+    )
+
+    return bool(re.search(pattern, text))
+
+
 def calculate_experience_score(resume, job):
-    resume_text = (
-        f"{resume.experience}\n"
-        f"{resume.extracted_text}"
-    ).lower()
+    """
+    Mesure la correspondance entre les expériences réellement
+    extraites du CV et les dimensions métier présentes dans l'offre.
+
+    Contrairement à la V1, extracted_text n'est pas utilisé :
+    une compétence présente ailleurs dans le CV ne constitue pas
+    automatiquement une preuve d'expérience professionnelle.
+    """
+    resume_text = (resume.experience or "").lower()
+
+    if not resume_text.strip():
+        return None
 
     job_text = (
-        f"{job.title}\n"
-        f"{job.description}"
+        f"{job.title or ''}\n"
+        f"{job.description or ''}"
     ).lower()
 
     experience_dimensions = {
@@ -229,6 +256,7 @@ def calculate_experience_score(resume, job):
         "analysis": [
             "analyse",
             "analyser",
+            "analyste",
             "analyst",
             "analytique",
         ],
@@ -249,10 +277,12 @@ def calculate_experience_score(resume, job):
             "python",
             "programmation",
             "développement",
+            "développer",
         ],
         "visualization": [
             "visualisation",
             "tableau de bord",
+            "tableaux de bord",
             "dashboard",
             "power bi",
         ],
@@ -267,7 +297,7 @@ def calculate_experience_score(resume, job):
 
     for dimension, keywords in experience_dimensions.items():
         if any(
-            keyword in job_text
+            _contains_experience_term(job_text, keyword)
             for keyword in keywords
         ):
             required_dimensions.append(
@@ -281,7 +311,7 @@ def calculate_experience_score(resume, job):
 
     for dimension, keywords in required_dimensions:
         if any(
-            keyword in resume_text
+            _contains_experience_term(resume_text, keyword)
             for keyword in keywords
         ):
             matched_dimensions.append(dimension)
@@ -294,48 +324,113 @@ def calculate_experience_score(resume, job):
 
     return round(score, 2)
 
+
+def _detect_required_education_level(text):
+    """
+    Retourne le niveau d'études minimum explicitement demandé.
+
+    3 = Bac+3 / Licence / Bachelor
+    4 = Bac+4
+    5 = Bac+5 / Master / diplôme d'ingénieur
+    """
+    import re
+
+    text = (text or "").lower()
+
+    level_patterns = {
+        5: [
+            r"\bbac\s*\+\s*5\b",
+            r"\bmaster\b",
+            r"\bdipl[oô]me\s+d['’]ing[eé]nieur\b",
+            r"\b[eé]cole\s+d['’]ing[eé]nieur\b",
+        ],
+        4: [
+            r"\bbac\s*\+\s*4\b",
+        ],
+        3: [
+            r"\bbac\s*\+\s*3\b",
+            r"\blicence\b",
+            r"\bbachelor\b",
+        ],
+    }
+
+    for level in (5, 4, 3):
+        if any(
+            re.search(pattern, text)
+            for pattern in level_patterns[level]
+        ):
+            return level
+
+    return None
+
+
+def _detect_candidate_education_level(text):
+    """
+    Détecte uniquement un niveau de formation explicitement
+    indiqué dans la partie formation du CV.
+    """
+    import re
+
+    text = (text or "").lower()
+
+    level_patterns = {
+        5: [
+            r"\bbac\s*\+\s*5\b",
+            r"\bmaster\b",
+            r"\bdipl[oô]me\s+d['’]ing[eé]nieur\b",
+        ],
+        4: [
+            r"\bbac\s*\+\s*4\b",
+        ],
+        3: [
+            r"\bbac\s*\+\s*3\b",
+            r"\blicence\b",
+            r"\bbachelor\b",
+        ],
+    }
+
+    for level in (5, 4, 3):
+        if any(
+            re.search(pattern, text)
+            for pattern in level_patterns[level]
+        ):
+            return level
+
+    return None
+
+
 def calculate_education_score(resume, job):
-    education_text = resume.education.lower()
-    job_text = job.description.lower()
+    """
+    Compare les niveaux de diplôme plutôt que des chaînes exactes.
 
-    education_requirements = [
-        "bac+3",
-        "bac +3",
-        "bac+4",
-        "bac +4",
-        "bac+5",
-        "bac +5",
-        "licence",
-        "master",
-        "miage",
-        "école d'ingénieur",
-        "école d’ingénieur",
-        "diplôme d'ingénieur",
-        "diplôme d’ingénieur",
-    ]
-
-    required = [
-        requirement
-        for requirement in education_requirements
-        if requirement in job_text
-    ]
-
-    # Si l'offre ne précise aucun niveau de formation,
-    # ce critère n'est pas évalué.
-    if not required:
-        return None
-
-    matched = [
-        requirement
-        for requirement in required
-        if requirement in education_text
-    ]
-
-    return round(
-        len(matched) / len(required) * 100,
-        2,
+    Une Licence satisfait donc une exigence Bac+3.
+    Un Master satisfait Bac+3/Bac+4/Bac+5.
+    Une formation future non présente dans resume.education
+    n'est pas prise en compte.
+    """
+    required_level = _detect_required_education_level(
+        job.description
     )
 
+    if required_level is None:
+        return None
+
+    candidate_level = _detect_candidate_education_level(
+        resume.education
+    )
+
+    if candidate_level is None:
+        return 0.0
+
+    if candidate_level >= required_level:
+        return 100.0
+
+    difference = required_level - candidate_level
+
+    if difference == 1:
+        return 60.0
+
+    return 25.0
 
 
 def calculate_scoring_summary(scores):
@@ -385,38 +480,6 @@ def calculate_scoring_summary(scores):
         "coverage_score": coverage_score,
         "confidence_level": confidence_level,
     }
-
-def calculate_overall_score(scores):
-    weights = {
-        "skill_score": 0.60,
-        "experience_score": 0.25,
-        "education_score": 0.15,
-    }
-
-    available = {
-        key: value
-        for key, value in scores.items()
-        if value is not None
-    }
-
-    if not available:
-        return 0
-
-    total_weight = sum(
-        weights[key]
-        for key in available
-    )
-
-    weighted_score = sum(
-        available[key] * weights[key]
-        for key in available
-    )
-
-    return round(
-        weighted_score / total_weight,
-        2,
-    )
-
 
 def generate_recommendations(result):
     strengths = []
@@ -684,4 +747,58 @@ def build_skills_gap(resume, jobs):
         ),
         "skills": result,
         "priority_skills": missing[:5],
+    }
+
+
+def preview_job_match(resume, job_data):
+    """
+    Pré-évalue une offre externe à partir des compétences.
+
+    Cette estimation est volontairement distincte du matching
+    complet CareerAI :
+    - aucun appel IA ;
+    - aucune analyse expérience/formation ;
+    - aucune création de Job ou Analysis ;
+    - score basé uniquement sur les compétences détectées.
+    """
+    resume_skills = extract_skills(
+        resume.extracted_text
+    )
+
+    job_text = (
+        f"{job_data.get('title', '')}\n"
+        f"{job_data.get('description', '')}"
+    )
+
+    job_skills = extract_skills(job_text)
+
+    classification = classify_job_skills(
+        job_text,
+        job_skills,
+    )
+
+    essential_skills = classification["essential"]
+    complementary_skills = classification[
+        "complementary"
+    ]
+
+    skill_score, matching_skills, missing_skills = (
+        calculate_skill_score(
+            resume_skills,
+            job_skills,
+            essential_skills=essential_skills,
+        )
+    )
+
+    return {
+        "external_id": str(
+            job_data.get("external_id", "")
+        ),
+        "score": skill_score,
+        "matching_skills": matching_skills,
+        "missing_skills": missing_skills,
+        "essential_skills": essential_skills,
+        "complementary_skills": complementary_skills,
+        "evaluated_skills_count": len(job_skills),
+        "basis": "skills_only",
     }

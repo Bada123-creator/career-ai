@@ -40,6 +40,21 @@ def job_list_create(request):
             "",
         )
 
+        if original_source_url:
+            existing_job = Job.objects.filter(
+                user=request.user,
+                source_url=original_source_url,
+            ).first()
+
+            if existing_job is not None:
+                return Response(
+                    {
+                        "detail": "Cette offre est déjà enregistrée.",
+                        "existing_job_id": existing_job.id,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
         try:
             enrichment = enrich_job_description(
                 description=original_description,
@@ -226,6 +241,16 @@ def job_search(request):
         1,
     )
 
+    contract_type = request.query_params.get(
+        "contract_type",
+        "",
+    )
+
+    sort_by = request.query_params.get(
+        "sort_by",
+        "date",
+    )
+
     if not query.strip():
         return Response(
             {
@@ -241,6 +266,8 @@ def job_search(request):
             query=query,
             location=location,
             page=page,
+            contract_type=contract_type,
+            sort_by=sort_by,
         )
 
     except JobSearchError as exc:
