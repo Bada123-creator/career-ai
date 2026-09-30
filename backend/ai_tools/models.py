@@ -1,3 +1,4 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.conf import settings
 from django.db import models
 
@@ -354,4 +355,89 @@ class JobRecommendation(models.Model):
             f"{self.job.title} - "
             f"{self.resume.title} - "
             f"{self.score:.0f}/100"
+        )
+
+
+class LearningSkill(models.Model):
+    STATUS_CHOICES = [
+        ("todo", "À apprendre"),
+        ("learning", "En cours"),
+        ("completed", "Maîtrisée"),
+    ]
+
+    PRIORITY_CHOICES = [
+        ("high", "Haute"),
+        ("medium", "Moyenne"),
+        ("low", "Faible"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="learning_skills",
+    )
+    resume = models.ForeignKey(
+        "cvs.Resume",
+        on_delete=models.CASCADE,
+        related_name="learning_skills",
+    )
+
+    skill = models.CharField(max_length=120)
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default="medium",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="todo",
+    )
+    progress = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[
+            MinValueValidator(0),
+            MaxValueValidator(100),
+        ],
+    )
+
+    objective = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
+
+    job_count = models.PositiveIntegerField(
+        default=0,
+    )
+    frequency = models.FloatField(
+        default=0,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = [
+            "status",
+            "-frequency",
+            "skill",
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "user",
+                    "resume",
+                    "skill",
+                ],
+                name="unique_learning_skill_per_resume",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.skill} - "
+            f"{self.user} - "
+            f"{self.progress}%"
         )

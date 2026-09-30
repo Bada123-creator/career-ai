@@ -1,3 +1,6 @@
+from django.db import IntegrityError
+from django.core.exceptions import ValidationError
+from django.test import TestCase
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -6,7 +9,7 @@ from rest_framework.test import APITestCase
 from cvs.models import Resume
 from jobs.models import Job
 
-from .models import Analysis
+from .models import Analysis, LearningSkill
 
 
 User = get_user_model()
@@ -832,3 +835,327 @@ class JobMatchPreviewTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+
+
+class LearningSkillModelTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="learning_user",
+            password="StrongPass123!",
+        )
+
+        self.resume = Resume.objects.create(
+            user=self.user,
+            title="CV Learning",
+            extracted_text="Python SQL Django",
+            skills="Python, SQL, Django",
+        )
+
+    def test_create_learning_skill(self):
+        learning_skill = LearningSkill.objects.create(
+            user=self.user,
+            resume=self.resume,
+            skill="Power BI",
+            priority="high",
+            status="todo",
+            progress=0,
+            job_count=3,
+            frequency=75.0,
+        )
+
+        self.assertEqual(
+            learning_skill.skill,
+            "Power BI",
+        )
+        self.assertEqual(
+            learning_skill.priority,
+            "high",
+        )
+        self.assertEqual(
+            learning_skill.status,
+            "todo",
+        )
+        self.assertEqual(
+            learning_skill.progress,
+            0,
+        )
+
+    def test_learning_skill_unique_per_resume(self):
+        LearningSkill.objects.create(
+            user=self.user,
+            resume=self.resume,
+            skill="Power BI",
+        )
+
+        with self.assertRaises(IntegrityError):
+            LearningSkill.objects.create(
+                user=self.user,
+                resume=self.resume,
+                skill="Power BI",
+            )
+
+    def test_progress_cannot_exceed_100(self):
+        learning_skill = LearningSkill(
+            user=self.user,
+            resume=self.resume,
+            skill="Azure",
+            progress=101,
+        )
+
+        with self.assertRaises(ValidationError):
+            learning_skill.full_clean()
+
+
+class LearningPlanAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="learning_api_user",
+            password="StrongPass123!",
+        )
+        self.other_user = User.objects.create_user(
+            username="learning_api_other",
+            password="StrongPass123!",
+        )
+
+        self.resume = Resume.objects.create(
+            user=self.user,
+            title="CV Data",
+            extracted_text="Python SQL Django",
+            skills="Python, SQL, Django",
+        )
+
+        self.other_resume = Resume.objects.create(
+            user=self.other_user,
+            title="CV Other",
+            extracted_text="Java",
+            skills="Java",
+        )
+
+        Job.objects.create(
+            user=self.user,
+            title="Data Analyst",
+            company="Entreprise A",
+            description=(
+                "Python SQL Power BI Excel"
+            ),
+        )
+
+        Job.objects.create(
+            user=self.user,
+            title="Data Analyst BI",
+            company="Entreprise B",
+            description=(
+                "SQL Power BI Tableau"
+            ),
+        )
+
+        self.client.force_authenticate(
+            user=self.user
+        )
+
+    def test_sync_learning_plan_creates_priority_skills(self):
+        response = self.client.post(
+            "/api/ai/learning-plan/sync/",
+            {
+                "resume_id": self.resume.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.assertGreater(
+            response.data["created_count"],
+            0,
+        )
+
+        self.assertEqual(
+            LearningSkill.objects.filter(
+                user=self.user,
+                resume=self.resume,
+            ).count(),
+            response.data["count"],
+        )
+
+    def test_sync_learning_plan_does_not_duplicate(self):
+        first = self.client.post(
+            "/api/ai/learning-plan/sync/",
+            {
+                "resume_id": self.resume.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            first.status_code,
+            200,
+        )
+
+        first_count = LearningSkill.objects.filter(
+            user=self.user,
+            resume=self.resume,
+        ).count()
+
+        second = self.client.post(
+            "/api/ai/learning-plan/sync/",
+            {
+                "resume_id": self.resume.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            second.status_code,
+            200,
+        )
+        self.assertEqual(
+            second.data["created_count"],
+            0,
+        )
+        self.assertEqual(
+            LearningSkill.objects.filter(
+                user=self.user,
+                resume=self.resume,
+            ).count(),
+            first_count,
+        )
+
+    def test_patch_progress_moves_skill_to_learning(self):
+        item = LearningSkill.objects.create(
+            user=self.user,
+            resume=self.resume,
+            skill="Power BI",
+            progress=0,
+            status="todo",
+        )
+
+        response = self.client.patch(
+            f"/api/ai/learning-skills/{item.id}/",
+            {
+                "progress": 40,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+        self.assertEqual(
+            response.data["progress"],
+            40,
+        )
+        self.assertEqual(
+            response.data["status"],
+            "learning",
+        )
+
+    def test_progress_100_marks_completed(self):
+        item = LearningSkill.objects.create(
+            user=self.user,
+            resume=self.resume,
+            skill="Azure",
+            status="learning",
+            progress=50,
+        )
+
+        response = self.client.patch(
+            f"/api/ai/learning-skills/{item.id}/",
+            {
+                "progress": 100,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+        self.assertEqual(
+            response.data["progress"],
+            100,
+        )
+        self.assertEqual(
+            response.data["status"],
+            "completed",
+        )
+
+    def test_completed_status_forces_progress_100(self):
+        item = LearningSkill.objects.create(
+            user=self.user,
+            resume=self.resume,
+            skill="Tableau",
+            progress=20,
+            status="learning",
+        )
+
+        response = self.client.patch(
+            f"/api/ai/learning-skills/{item.id}/",
+            {
+                "status": "completed",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+        self.assertEqual(
+            response.data["progress"],
+            100,
+        )
+        self.assertEqual(
+            response.data["status"],
+            "completed",
+        )
+
+    def test_progress_above_100_is_rejected(self):
+        item = LearningSkill.objects.create(
+            user=self.user,
+            resume=self.resume,
+            skill="Spark",
+        )
+
+        response = self.client.patch(
+            f"/api/ai/learning-skills/{item.id}/",
+            {
+                "progress": 101,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            400,
+        )
+
+    def test_user_cannot_update_other_users_skill(self):
+        item = LearningSkill.objects.create(
+            user=self.other_user,
+            resume=self.other_resume,
+            skill="AWS",
+        )
+
+        response = self.client.patch(
+            f"/api/ai/learning-skills/{item.id}/",
+            {
+                "progress": 50,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            404,
+        )
+
+        item.refresh_from_db()
+
+        self.assertEqual(
+            item.progress,
+            0,
+        )

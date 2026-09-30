@@ -14,6 +14,7 @@ from .models import (
     InterviewPreparation,
     InterviewReport,
     JobRecommendation,
+    LearningSkill,
 )
 from .services import (
     match_resume_to_job,
@@ -1759,6 +1760,280 @@ def skills_gap(request):
 
     return Response(
         result,
+        status=status.HTTP_200_OK,
+    )
+
+
+def serialize_learning_skill(item):
+    return {
+        "id": item.id,
+        "resume_id": item.resume_id,
+        "skill": item.skill,
+        "priority": item.priority,
+        "status": item.status,
+        "progress": item.progress,
+        "objective": item.objective,
+        "notes": item.notes,
+        "job_count": item.job_count,
+        "frequency": item.frequency,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def learning_plan(request):
+    resume_id = request.query_params.get("resume_id")
+
+    if not resume_id:
+        return Response(
+            {"detail": "resume_id est obligatoire."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        resume = Resume.objects.get(
+            id=resume_id,
+            user=request.user,
+        )
+    except (Resume.DoesNotExist, ValueError):
+        return Response(
+            {"detail": "CV introuvable."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    items = LearningSkill.objects.filter(
+        user=request.user,
+        resume=resume,
+    )
+
+    return Response(
+        {
+            "resume": {
+                "id": resume.id,
+                "title": resume.title,
+            },
+            "count": items.count(),
+            "skills": [
+                serialize_learning_skill(item)
+                for item in items
+            ],
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def sync_learning_plan(request):
+    resume_id = request.data.get("resume_id")
+
+    if not resume_id:
+        return Response(
+            {"detail": "resume_id est obligatoire."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        resume = Resume.objects.get(
+            id=resume_id,
+            user=request.user,
+        )
+    except (Resume.DoesNotExist, ValueError):
+        return Response(
+            {"detail": "CV introuvable."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if not resume.extracted_text.strip():
+        return Response(
+            {
+                "detail": (
+                    "Ce CV ne contient aucun texte exploitable."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    jobs = list(
+        Job.objects.filter(
+            user=request.user
+        ).order_by("-created_at")
+    )
+
+    gap = build_skills_gap(
+        resume,
+        jobs,
+    )
+
+    created_count = 0
+    updated_count = 0
+
+    for skill_data in gap["priority_skills"]:
+        item, created = LearningSkill.objects.get_or_create(
+            user=request.user,
+            resume=resume,
+            skill=skill_data["skill"],
+            defaults={
+                "priority": skill_data["priority"],
+                "job_count": skill_data["job_count"],
+                "frequency": skill_data["frequency"],
+            },
+        )
+
+        if created:
+            created_count += 1
+            continue
+
+        changed = False
+
+        for field in (
+            "priority",
+            "job_count",
+            "frequency",
+        ):
+            value = skill_data[field]
+
+            if getattr(item, field) != value:
+                setattr(item, field, value)
+                changed = True
+
+        if changed:
+            item.save(
+                update_fields=[
+                    "priority",
+                    "job_count",
+                    "frequency",
+                    "updated_at",
+                ]
+            )
+            updated_count += 1
+
+    items = LearningSkill.objects.filter(
+        user=request.user,
+        resume=resume,
+    )
+
+    return Response(
+        {
+            "resume": {
+                "id": resume.id,
+                "title": resume.title,
+            },
+            "created_count": created_count,
+            "updated_count": updated_count,
+            "count": items.count(),
+            "skills": [
+                serialize_learning_skill(item)
+                for item in items
+            ],
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def learning_skill_detail(request, skill_id):
+    try:
+        item = LearningSkill.objects.get(
+            id=skill_id,
+            user=request.user,
+        )
+    except LearningSkill.DoesNotExist:
+        return Response(
+            {"detail": "Compétence introuvable."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    allowed_fields = {
+        "status",
+        "progress",
+        "objective",
+        "notes",
+    }
+
+    unknown_fields = (
+        set(request.data.keys()) - allowed_fields
+    )
+
+    if unknown_fields:
+        return Response(
+            {
+                "detail": (
+                    "Champ non modifiable : "
+                    + ", ".join(sorted(unknown_fields))
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if "status" in request.data:
+        new_status = request.data["status"]
+
+        valid_statuses = {
+            choice[0]
+            for choice in LearningSkill.STATUS_CHOICES
+        }
+
+        if new_status not in valid_statuses:
+            return Response(
+                {"detail": "Statut invalide."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        item.status = new_status
+
+    if "progress" in request.data:
+        try:
+            progress = int(request.data["progress"])
+        except (TypeError, ValueError):
+            return Response(
+                {
+                    "detail": (
+                        "La progression doit être "
+                        "un nombre entier."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if progress < 0 or progress > 100:
+            return Response(
+                {
+                    "detail": (
+                        "La progression doit être "
+                        "comprise entre 0 et 100."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        item.progress = progress
+
+    if "objective" in request.data:
+        item.objective = str(
+            request.data["objective"] or ""
+        )
+
+    if "notes" in request.data:
+        item.notes = str(
+            request.data["notes"] or ""
+        )
+
+    if item.status == "completed":
+        item.progress = 100
+    elif item.progress == 100:
+        item.status = "completed"
+    elif item.progress > 0 and item.status == "todo":
+        item.status = "learning"
+
+    item.full_clean()
+    item.save()
+
+    return Response(
+        serialize_learning_skill(item),
         status=status.HTTP_200_OK,
     )
 

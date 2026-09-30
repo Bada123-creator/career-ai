@@ -7,6 +7,7 @@ import {
   BookOpen,
   CheckCircle2,
   Loader2,
+  RefreshCw,
   Target,
   TrendingUp,
 } from "lucide-react";
@@ -18,6 +19,14 @@ import {
   SkillGapItem,
   SkillsGapResponse,
 } from "@/lib/api/skills-gap";
+import {
+  getLearningPlan,
+  LearningPlanResponse,
+  LearningSkill,
+  LearningSkillStatus,
+  syncLearningPlan,
+  updateLearningSkill,
+} from "@/lib/api/learning-plan";
 
 type ResumeOption = {
   id: number;
@@ -73,6 +82,18 @@ export default function SkillsGapPage() {
   const [error, setError] =
     useState("");
 
+  const [learningPlan, setLearningPlan] =
+    useState<LearningPlanResponse | null>(null);
+
+  const [learningPlanLoading, setLearningPlanLoading] =
+    useState(false);
+
+  const [savingSkillId, setSavingSkillId] =
+    useState<number | null>(null);
+
+  const [learningMessage, setLearningMessage] =
+    useState("");
+
   useEffect(() => {
     async function loadResumes() {
       try {
@@ -103,6 +124,95 @@ export default function SkillsGapPage() {
     loadResumes();
   }, []);
 
+  async function loadLearningPlan(
+    resumeId: number
+  ) {
+    try {
+      const data = await getLearningPlan(resumeId);
+      setLearningPlan(data);
+    } catch {
+      setLearningPlan(null);
+    }
+  }
+
+  async function handleSyncLearningPlan() {
+    if (!selectedResumeId) {
+      return;
+    }
+
+    try {
+      setLearningPlanLoading(true);
+      setError("");
+      setLearningMessage("");
+
+      const data =
+        await syncLearningPlan(selectedResumeId);
+
+      setLearningPlan(data);
+
+      if (data.created_count > 0) {
+        setLearningMessage(
+          `${data.created_count} compétence${
+            data.created_count !== 1 ? "s" : ""
+          } ajoutée${
+            data.created_count !== 1 ? "s" : ""
+          } au plan.`
+        );
+      } else {
+        setLearningMessage(
+          "Ton plan d’apprentissage est à jour."
+        );
+      }
+    } catch {
+      setError(
+        "Impossible de synchroniser le plan d’apprentissage."
+      );
+    } finally {
+      setLearningPlanLoading(false);
+    }
+  }
+
+  async function handleUpdateLearningSkill(
+    item: LearningSkill,
+    payload: {
+      status?: LearningSkillStatus;
+      progress?: number;
+      objective?: string;
+      notes?: string;
+    }
+  ) {
+    try {
+      setSavingSkillId(item.id);
+      setError("");
+
+      const updated = await updateLearningSkill(
+        item.id,
+        payload
+      );
+
+      setLearningPlan((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          skills: current.skills.map((skill) =>
+            skill.id === updated.id
+              ? updated
+              : skill
+          ),
+        };
+      });
+    } catch {
+      setError(
+        "Impossible de mettre à jour cette compétence."
+      );
+    } finally {
+      setSavingSkillId(null);
+    }
+  }
+
   async function analyzeSkills() {
     if (!selectedResumeId) {
       return;
@@ -116,6 +226,7 @@ export default function SkillsGapPage() {
         await getSkillsGap(selectedResumeId);
 
       setResult(data);
+      await loadLearningPlan(selectedResumeId);
     } catch {
       setError(
         "Impossible d'analyser les compétences."
@@ -173,6 +284,8 @@ export default function SkillsGapPage() {
                   Number(event.target.value)
                 );
                 setResult(null);
+                setLearningPlan(null);
+                setLearningMessage("");
               }}
               className="min-w-64 rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-200 outline-none focus:border-blue-500"
             >
@@ -388,6 +501,242 @@ export default function SkillsGapPage() {
                       </div>
                     )
                   )}
+                </div>
+              )}
+            </section>
+
+            <section className="mt-8 rounded-2xl border border-blue-500/20 bg-slate-900 p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-xl bg-blue-500/10 p-2">
+                    <BookOpen className="h-5 w-5 text-blue-400" />
+                  </div>
+
+                  <div>
+                    <h2 className="text-xl font-semibold">
+                      Mon plan d&apos;apprentissage
+                    </h2>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                      Suis ta progression sur les compétences
+                      prioritaires détectées par CareerAI.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSyncLearningPlan}
+                  disabled={learningPlanLoading}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {learningPlanLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+
+                  Synchroniser mon plan
+                </button>
+              </div>
+
+              {learningMessage && (
+                <div className="mt-5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-300">
+                  {learningMessage}
+                </div>
+              )}
+
+              {!learningPlan ||
+              learningPlan.skills.length === 0 ? (
+                <div className="mt-6 rounded-xl border border-dashed border-slate-700 bg-slate-950/50 p-8 text-center">
+                  <BookOpen className="mx-auto h-8 w-8 text-slate-600" />
+
+                  <p className="mt-3 font-medium">
+                    Ton plan est encore vide
+                  </p>
+
+                  <p className="mt-1 text-sm text-slate-500">
+                    Clique sur « Synchroniser mon plan » pour
+                    ajouter tes compétences prioritaires.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-6 space-y-4">
+                  {learningPlan.skills.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-slate-800 bg-slate-950 p-5"
+                    >
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold">
+                              {item.skill}
+                            </h3>
+
+                            <span className="rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300">
+                              {item.priority === "high"
+                                ? "Priorité haute"
+                                : item.priority === "medium"
+                                  ? "Priorité moyenne"
+                                  : "Priorité faible"}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 text-xs text-slate-500">
+                            {item.job_count} offre
+                            {item.job_count !== 1 ? "s" : ""}
+                            {" • "}
+                            {item.frequency}% de fréquence
+                          </p>
+                        </div>
+
+                        <select
+                          value={item.status}
+                          disabled={savingSkillId === item.id}
+                          onChange={(event) =>
+                            handleUpdateLearningSkill(item, {
+                              status:
+                                event.target
+                                  .value as LearningSkillStatus,
+                            })
+                          }
+                          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                        >
+                          <option value="todo">
+                            À apprendre
+                          </option>
+                          <option value="learning">
+                            En cours
+                          </option>
+                          <option value="completed">
+                            Maîtrisée
+                          </option>
+                        </select>
+                      </div>
+
+                      <div className="mt-5">
+                        <div className="mb-2 flex items-center justify-between text-sm">
+                          <span className="text-slate-400">
+                            Progression
+                          </span>
+
+                          <span className="font-semibold text-blue-400">
+                            {item.progress}%
+                          </span>
+                        </div>
+
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="5"
+                          value={item.progress}
+                          disabled={savingSkillId === item.id}
+                          onChange={(event) => {
+                            const progress = Number(
+                              event.target.value
+                            );
+
+                            setLearningPlan((current) => {
+                              if (!current) return current;
+
+                              return {
+                                ...current,
+                                skills: current.skills.map(
+                                  (skill) =>
+                                    skill.id === item.id
+                                      ? {
+                                          ...skill,
+                                          progress,
+                                        }
+                                      : skill
+                                ),
+                              };
+                            });
+                          }}
+                          onMouseUp={(event) =>
+                            handleUpdateLearningSkill(item, {
+                              progress: Number(
+                                event.currentTarget.value
+                              ),
+                            })
+                          }
+                          onTouchEnd={(event) =>
+                            handleUpdateLearningSkill(item, {
+                              progress: Number(
+                                event.currentTarget.value
+                              ),
+                            })
+                          }
+                          className="w-full accent-blue-500"
+                        />
+                      </div>
+
+                      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-xs font-medium text-slate-400">
+                            Objectif
+                          </label>
+
+                          <input
+                            type="text"
+                            defaultValue={item.objective}
+                            placeholder="Ex. Créer un dashboard Power BI"
+                            onBlur={(event) => {
+                              if (
+                                event.target.value !==
+                                item.objective
+                              ) {
+                                handleUpdateLearningSkill(
+                                  item,
+                                  {
+                                    objective:
+                                      event.target.value,
+                                  }
+                                );
+                              }
+                            }}
+                            className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5 text-sm outline-none placeholder:text-slate-600 focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-xs font-medium text-slate-400">
+                            Notes
+                          </label>
+
+                          <input
+                            type="text"
+                            defaultValue={item.notes}
+                            placeholder="Cours, ressources, prochaines étapes..."
+                            onBlur={(event) => {
+                              if (
+                                event.target.value !==
+                                item.notes
+                              ) {
+                                handleUpdateLearningSkill(
+                                  item,
+                                  {
+                                    notes:
+                                      event.target.value,
+                                  }
+                                );
+                              }
+                            }}
+                            className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5 text-sm outline-none placeholder:text-slate-600 focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+
+                      {savingSkillId === item.id && (
+                        <div className="mt-3 flex items-center gap-2 text-xs text-blue-400">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Sauvegarde...
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </section>
